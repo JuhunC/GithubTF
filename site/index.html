@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -31,6 +31,7 @@
       <a href="#migration">Migration</a>
       <a href="#references">References</a>
     </nav>
+    <a href="index.ko.html" class="lang-btn" title="한국어로 보기">한국어</a>
   </div>
 </header>
 
@@ -725,7 +726,15 @@ stateDiagram-v2
     const svg = container.querySelector('svg');
     if (!svg) return;
 
-    // Strip Mermaid's intrinsic dimensions so it stretches to the container
+    // Mermaid emits explicit px width/height but no viewBox. svg-pan-zoom needs a
+    // viewBox to compute a non-zero initial scale; without it the transform matrix
+    // becomes matrix(0,0,0,0,…) and the diagram renders invisible. Capture the
+    // dimensions first, then strip them so CSS controls sizing.
+    if (!svg.getAttribute('viewBox')) {
+      const w = parseFloat(svg.getAttribute('width') || 0);
+      const h = parseFloat(svg.getAttribute('height') || 0);
+      if (w && h) svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+    }
     svg.removeAttribute('width');
     svg.removeAttribute('height');
     svg.style.maxWidth = '100%';
@@ -738,59 +747,62 @@ stateDiagram-v2
     // Toolbar
     const toolbar = document.createElement('div');
     toolbar.className = 'diagram-toolbar';
-    toolbar.appendChild(makeBtn('+', 'Zoom in', 'in'));
-    toolbar.appendChild(makeBtn('−', 'Zoom out', 'out'));
-    toolbar.appendChild(makeBtn('↺', 'Reset / fit', 'reset'));
+    toolbar.appendChild(makeBtn('＋', 'Zoom in', 'in'));
+    toolbar.appendChild(makeBtn('－', 'Zoom out', 'out'));
+    toolbar.appendChild(makeBtn('⤢', 'Fit to view', 'reset'));
     toolbar.appendChild(makeBtn('⛶', 'Fullscreen', 'full'));
     container.appendChild(toolbar);
 
     // Hint
     const hint = document.createElement('div');
     hint.className = 'diagram-hint';
-    hint.textContent = 'Drag to pan · scroll / pinch to zoom · double-click to zoom in';
+    hint.textContent = 'Drag to pan · scroll to zoom · double-click to zoom in';
     container.appendChild(hint);
 
-    // Init pan/zoom
-    const pz = svgPanZoom(svg, {
-      controlIconsEnabled: false,
-      panEnabled: true,
-      zoomEnabled: true,
-      dblClickZoomEnabled: true,
-      mouseWheelZoomEnabled: true,
-      preventMouseEventsDefault: true,
-      zoomScaleSensitivity: 0.3,
-      minZoom: 0.3,
-      maxZoom: 12,
-      fit: true,
-      center: true,
-      contain: false
-    });
+    // Defer svg-pan-zoom init to the next frame so the browser has laid out the SVG
+    // at its final rendered size before the library measures it.
+    requestAnimationFrame(() => {
+      const pz = svgPanZoom(svg, {
+        controlIconsEnabled: false,
+        panEnabled: true,
+        zoomEnabled: true,
+        dblClickZoomEnabled: true,
+        mouseWheelZoomEnabled: true,
+        preventMouseEventsDefault: true,
+        zoomScaleSensitivity: 0.25,
+        minZoom: 0.05,
+        maxZoom: 12,
+        fit: true,
+        center: true,
+        contain: false
+      });
 
-    toolbar.addEventListener('click', (e) => {
-      const btn = e.target.closest('button[data-act]');
-      if (!btn) return;
-      const a = btn.dataset.act;
-      if (a === 'in') pz.zoomBy(1.3);
-      else if (a === 'out') pz.zoomBy(1 / 1.3);
-      else if (a === 'reset') { pz.resetZoom(); pz.center(); pz.fit(); }
-      else if (a === 'full') {
-        const el = container;
-        if (!document.fullscreenElement) {
-          (el.requestFullscreen || el.webkitRequestFullscreen || (() => {})).call(el);
-        } else {
-          (document.exitFullscreen || document.webkitExitFullscreen || (() => {})).call(document);
+      toolbar.addEventListener('click', (e) => {
+        const btn = e.target.closest('button[data-act]');
+        if (!btn) return;
+        const a = btn.dataset.act;
+        if (a === 'in') pz.zoomBy(1.4);
+        else if (a === 'out') pz.zoomBy(1 / 1.4);
+        else if (a === 'reset') { pz.fit(); pz.center(); }
+        else if (a === 'full') {
+          const el = container;
+          if (!document.fullscreenElement) {
+            (el.requestFullscreen || el.webkitRequestFullscreen || (() => {})).call(el);
+          } else {
+            (document.exitFullscreen || document.webkitExitFullscreen || (() => {})).call(document);
+          }
         }
-      }
-    });
+      });
 
-    // Re-fit when the container changes size (sidebar toggle, fullscreen, window resize)
-    const refit = () => {
-      try { pz.resize(); pz.fit(); pz.center(); } catch (_) {}
-    };
-    const ro = new ResizeObserver(refit);
-    ro.observe(container);
-    document.addEventListener('fullscreenchange', refit);
-    document.addEventListener('webkitfullscreenchange', refit);
+      // Re-fit when the container changes size (sidebar toggle, fullscreen, window resize)
+      const refit = () => {
+        try { pz.resize(); pz.fit(); pz.center(); } catch (_) {}
+      };
+      const ro = new ResizeObserver(refit);
+      ro.observe(container);
+      document.addEventListener('fullscreenchange', refit);
+      document.addEventListener('webkitfullscreenchange', refit);
+    });
   }
 
   function initSidebarToggle() {
