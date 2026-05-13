@@ -1,0 +1,585 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Firmware CI/CD Architecture — GitHub Enterprise on Kubernetes</title>
+<meta name="description" content="Architecture plan for replacing Bamboo + Bitbucket with GitHub Enterprise Server + Actions Runner Controller on Kubernetes for firmware CI/CD." />
+<link rel="stylesheet" href="styles.css" />
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <span class="logo">⚙︎</span>
+      <span>Firmware CI/CD Architecture</span>
+    </div>
+    <nav class="topnav">
+      <a href="#overview">Overview</a>
+      <a href="#diagram">Architecture</a>
+      <a href="#components">Components</a>
+      <a href="#governance">Governance</a>
+      <a href="#data">Data</a>
+      <a href="#migration">Migration</a>
+      <a href="#references">References</a>
+    </nav>
+  </div>
+</header>
+
+<div class="layout">
+
+<aside class="sidebar">
+  <h3>On this page</h3>
+  <ol class="toc">
+    <li><a href="#overview">Executive summary</a></li>
+    <li><a href="#requirements">Requirements</a></li>
+    <li><a href="#diagram">High-level architecture</a></li>
+    <li><a href="#components">Component design</a>
+      <ol>
+        <li><a href="#c-ghes">GHES</a></li>
+        <li><a href="#c-arc">ARC runners</a></li>
+        <li><a href="#c-orch">Release orchestrator</a></li>
+        <li><a href="#c-qgs">Quality gate service</a></li>
+        <li><a href="#c-hw">HW-in-the-loop</a></li>
+      </ol>
+    </li>
+    <li><a href="#runner-pools">Runner pool isolation</a></li>
+    <li><a href="#gate-sequence">CD gate sequence</a></li>
+    <li><a href="#data">Data persistence</a></li>
+    <li><a href="#hw-state">HW reservation states</a></li>
+    <li><a href="#governance">Resource governance</a></li>
+    <li><a href="#concerns">Concerns mapping</a></li>
+    <li><a href="#migration">Migration plan</a></li>
+    <li><a href="#risks">Risks</a></li>
+    <li><a href="#references">References</a></li>
+  </ol>
+</aside>
+
+<main class="content">
+
+<section id="overview">
+  <h1>Firmware CI/CD on GitHub Enterprise</h1>
+  <p class="lede">
+    Replacing <a href="https://www.atlassian.com/software/bamboo" target="_blank" rel="noopener">Atlassian Bamboo</a> + Bitbucket + a custom Spring Boot release app with a GitHub-native CI/CD platform running on
+    <a href="https://docs.github.com/en/enterprise-server@latest" target="_blank" rel="noopener">GitHub Enterprise Server (GHES)</a>,
+    <a href="https://docs.github.com/en/actions" target="_blank" rel="noopener">GitHub Actions</a>, and the
+    <a href="https://github.com/actions/actions-runner-controller" target="_blank" rel="noopener">Actions Runner Controller (ARC)</a>
+    on Kubernetes — designed for 300+ developers, 5,000+ builds/day, with hardware-in-the-loop firmware testing.
+  </p>
+
+  <div class="pill-row">
+    <span class="pill">On-prem / private network</span>
+    <span class="pill">300+ developers</span>
+    <span class="pill">5,000+ builds/day</span>
+    <span class="pill">HW-in-the-loop</span>
+    <span class="pill">7-year release retention</span>
+  </div>
+
+  <div class="cards">
+    <div class="card">
+      <h4>Separate runner pools</h4>
+      <p>CI / CD / HW are <strong>physically separated</strong> ARC <a href="https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners-with-actions-runner-controller/deploying-runner-scale-sets-with-actions-runner-controller" target="_blank" rel="noopener">RunnerScaleSets</a> on different K8s node pools — CI cannot starve CD.</p>
+    </div>
+    <div class="card">
+      <h4>Replace the Spring Boot app</h4>
+      <p>A GitHub App + <a href="https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment" target="_blank" rel="noopener">Environments</a> + the <a href="https://docs.github.com/en/rest/deployments/deployments" target="_blank" rel="noopener">Deployments API</a> replace the legacy orchestrator. Opaque Bamboo Python scripts become reviewable YAML.</p>
+    </div>
+    <div class="card">
+      <h4>Fail-safe CD gating</h4>
+      <p>The Quality Gate Service publishes a <a href="https://docs.github.com/en/rest/checks/runs" target="_blank" rel="noopener">check run</a>; the Environment protection rule requires it. No status = release blocked.</p>
+    </div>
+    <div class="card">
+      <h4>Permanent results</h4>
+      <p>Firmware binaries land in <a href="https://min.io/docs/minio/linux/index.html" target="_blank" rel="noopener">MinIO</a>/<a href="https://docs.ceph.com/" target="_blank" rel="noopener">Ceph</a> with <a href="https://min.io/docs/minio/linux/administration/object-management/object-retention.html" target="_blank" rel="noopener">object lock</a> for 7 years; metadata in <a href="https://www.postgresql.org/docs/" target="_blank" rel="noopener">PostgreSQL</a>; metrics in <a href="https://docs.influxdata.com/" target="_blank" rel="noopener">InfluxDB</a> + <a href="https://grafana.com/docs/" target="_blank" rel="noopener">Grafana</a>.</p>
+    </div>
+  </div>
+</section>
+
+<section id="requirements">
+  <h2>Requirements</h2>
+  <table class="req">
+    <thead><tr><th>#</th><th>Requirement</th><th>Source</th></tr></thead>
+    <tbody>
+      <tr><td>R1</td><td>Developers can author their own CI workflows</td><td>Flexibility goal</td></tr>
+      <tr><td>R2</td><td>Heavy CI users cannot starve CD resources</td><td>Stated concern</td></tr>
+      <tr><td>R3</td><td>Runners cannot be used for non-CI/CD compute</td><td>Stated concern</td></tr>
+      <tr><td>R4</td><td>CD/release results persist permanently for analysis</td><td>Stated concern</td></tr>
+      <tr><td>R5</td><td>CD release blocked if criteria not met</td><td>Stated concern</td></tr>
+      <tr><td>R6</td><td>HW-in-the-loop benches integrate with pipelines</td><td>Replaces Bamboo HW pinning</td></tr>
+      <tr><td>R7</td><td>All components run on private corporate network</td><td>Project context</td></tr>
+      <tr><td>R8</td><td>Spring Boot release app fully replaced</td><td>Decision</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="diagram">
+  <h2>High-level architecture</h2>
+  <p>The major systems and how they communicate. GHES is the source of truth; ARC scales runners on Kubernetes; CD is gated by the Quality Gate Service through GitHub Environment protection rules.</p>
+  <div class="diagram">
+    <pre class="mermaid">
+flowchart TB
+  subgraph DEV[Developers]
+    D1[Push / PR]
+  end
+
+  subgraph GHES[GitHub Enterprise Server]
+    REPO[Repos and Workflows]
+    ENV[Environments and Protection Rules]
+    APP[Release Orchestrator GitHub App]
+    REQW[Required Workflows org policy]
+  end
+
+  subgraph K8S[Kubernetes Cluster]
+    ARC[Actions Runner Controller]
+    subgraph POOLS[Runner Pools - separated]
+      CIP[CI Pool]
+      CDP[CD Pool]
+      HWP[HW Pool]
+    end
+    QGS[Quality Gate Service]
+    HWS[HW Reservation Service]
+    OPA[OPA Gatekeeper]
+  end
+
+  subgraph HW[Lab - HW-in-the-loop]
+    BENCH1[Test Bench A]
+    BENCH2[Test Bench B]
+    BENCHN[Test Bench N]
+  end
+
+  subgraph DATA[Data and Persistence]
+    S3[S3 MinIO/Ceph]
+    NFS[NFS captures]
+    PG[(PostgreSQL)]
+    INFLUX[(InfluxDB)]
+    GRAF[Grafana]
+  end
+
+  subgraph TEST[Custom Test Systems]
+    TS1[Unit/Integration]
+    TS2[Firmware Validation]
+    TS3[Compliance/Safety]
+  end
+
+  D1 --> REPO
+  REPO -->|workflow_run| ARC
+  REQW -. enforces .-> REPO
+  ARC --> CIP
+  ARC --> CDP
+  ARC --> HWP
+  HWP <--> HWS
+  HWS <--> BENCH1
+  HWS <--> BENCH2
+  HWS <--> BENCHN
+  CIP --> S3
+  CDP --> S3
+  HWP --> NFS
+  CDP -->|deployment event| APP
+  APP --> ENV
+  APP --> PG
+  APP --> QGS
+  TEST -->|results webhook| QGS
+  QGS -->|check run| ENV
+  ENV -->|approve or block| CDP
+  ARC -->|metrics| INFLUX
+  OPA -. admission .-> POOLS
+  INFLUX --> GRAF
+  PG --> GRAF
+    </pre>
+  </div>
+</section>
+
+<section id="components">
+  <h2>Component design</h2>
+
+  <article id="c-ghes" class="component">
+    <h3>GHES — system of record</h3>
+    <p>
+      <a href="https://docs.github.com/en/enterprise-server@latest/admin/overview/about-github-enterprise-server" target="_blank" rel="noopener">GitHub Enterprise Server</a>
+      hosts every repo, workflow, and release event. The key features we lean on:
+    </p>
+    <ul>
+      <li><a href="https://docs.github.com/en/actions/using-workflows/reusing-workflows" target="_blank" rel="noopener">Reusable workflows</a> &amp; <a href="https://docs.github.com/en/actions/creating-actions/creating-a-composite-action" target="_blank" rel="noopener">composite actions</a> for shared CI patterns.</li>
+      <li><a href="https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment" target="_blank" rel="noopener">Environments</a> with required reviewers and <a href="https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment#required-reviewers" target="_blank" rel="noopener">protection rules</a> — the primary CD blocking mechanism.</li>
+      <li><a href="https://docs.github.com/en/actions/using-workflows/required-workflows" target="_blank" rel="noopener">Required workflows</a> at the org level — every repo runs our mandatory policy/security jobs.</li>
+      <li><a href="https://docs.github.com/en/apps/creating-github-apps/about-creating-github-apps/about-creating-github-apps" target="_blank" rel="noopener">GitHub Apps</a> with installation tokens scoped per repo for the Release Orchestrator.</li>
+      <li><a href="https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect" target="_blank" rel="noopener">OIDC tokens</a> for keyless runner-to-service auth (S3, Postgres, HW reservation).</li>
+    </ul>
+  </article>
+
+  <article id="c-arc" class="component">
+    <h3>Runners — Actions Runner Controller on Kubernetes</h3>
+    <p>
+      <a href="https://github.com/actions/actions-runner-controller" target="_blank" rel="noopener">ARC</a> is the canonical Kubernetes operator for GitHub Actions self-hosted runners. It autoscales runners as ephemeral pods — fresh pod per job, destroyed afterward. No persistent state for misuse to take root in.
+    </p>
+    <p>Three independent <a href="https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners-with-actions-runner-controller/deploying-runner-scale-sets-with-actions-runner-controller" target="_blank" rel="noopener">RunnerScaleSets</a>:</p>
+    <table>
+      <thead><tr><th>Pool</th><th>Labels</th><th>Namespace</th><th>Triggers</th><th>Resource profile</th></tr></thead>
+      <tbody>
+        <tr><td>CI</td><td><code>ci</code>, <code>linux-x64</code></td><td><code>runners-ci-&lt;team&gt;</code></td><td>PR + push on feature branches</td><td>Per-team <a href="https://kubernetes.io/docs/concepts/policy/resource-quotas/" target="_blank" rel="noopener">ResourceQuota</a></td></tr>
+        <tr><td>CD</td><td><code>cd</code>, <code>release</code></td><td><code>runners-cd</code></td><td>Only <code>release</code> &amp; <code>deployment</code> events</td><td>Reserved capacity, never preempted</td></tr>
+        <tr><td>HW</td><td><code>hw-bench-&lt;id&gt;</code>, <code>firmware-&lt;product&gt;</code></td><td><code>runners-hw</code></td><td>Workflows requesting bench label</td><td>K8s <a href="https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#nodeselector" target="_blank" rel="noopener">nodeSelector</a> + <a href="https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/" target="_blank" rel="noopener">taints/tolerations</a></td></tr>
+      </tbody>
+    </table>
+    <p>Custom runner images are built nightly, signed with <a href="https://github.com/sigstore/cosign" target="_blank" rel="noopener">cosign</a>, pulled from an internal registry, and contain only approved toolchains. To add a new tool, a developer raises a PR against the runner-image repo — they cannot install at runtime.</p>
+  </article>
+
+  <article id="c-orch" class="component">
+    <h3>Release Orchestrator (replaces Spring Boot)</h3>
+    <p>A small <a href="https://docs.github.com/en/apps/creating-github-apps/about-creating-github-apps/about-creating-github-apps" target="_blank" rel="noopener">GitHub App</a> with a thin backend on the same Kubernetes cluster. Responsibilities:</p>
+    <ol>
+      <li>Listen for <a href="https://docs.github.com/en/webhooks/webhook-events-and-payloads#release" target="_blank" rel="noopener"><code>release.published</code></a> and <a href="https://docs.github.com/en/webhooks/webhook-events-and-payloads#deployment" target="_blank" rel="noopener"><code>deployment.created</code></a> webhooks.</li>
+      <li>Create a <code>firmware_release</code> row in PostgreSQL with commit SHA, version, target HW, requester.</li>
+      <li>Open a GitHub <a href="https://docs.github.com/en/rest/deployments/deployments" target="_blank" rel="noopener">Deployment</a> on the <code>production-firmware</code> Environment, triggering protection rules.</li>
+      <li>Consume <a href="https://docs.github.com/en/rest/checks/runs" target="_blank" rel="noopener">check runs</a> and <a href="https://docs.github.com/en/rest/commits/statuses" target="_blank" rel="noopener">commit statuses</a> from CI and from the Quality Gate Service.</li>
+      <li>On success, persist final artifacts to S3 with <a href="https://min.io/docs/minio/linux/administration/object-management/object-retention.html" target="_blank" rel="noopener">object lock</a> (<code>compliance-7y</code>).</li>
+    </ol>
+    <p>The orchestration logic that Bamboo encoded in opaque Python scripts now lives as <strong>transparent, version-controlled YAML workflows</strong> developers can read.</p>
+  </article>
+
+  <article id="c-qgs" class="component">
+    <h3>Quality Gate Service (CD blocker)</h3>
+    <p>Translates results from your custom test systems into GitHub <a href="https://docs.github.com/en/rest/checks/runs" target="_blank" rel="noopener">check runs</a>. Blocking is enforced by GitHub itself — if QGS is down, the gate stays closed (fail-safe).</p>
+    <ol>
+      <li>Test systems POST results to <code>https://qgs.internal/v1/results</code>.</li>
+      <li>QGS evaluates against per-product release criteria (versioned YAML in a <code>release-policies</code> repo).</li>
+      <li>QGS publishes <code>qgs/release-criteria</code> check with <code>success | failure</code>.</li>
+      <li>The <code>production-firmware</code> Environment requires that check — no status = blocked.</li>
+    </ol>
+  </article>
+
+  <article id="c-hw" class="component">
+    <h3>HW-in-the-loop runners</h3>
+    <p>Bamboo's "agents pinned to HW" maps onto ARC with custom K8s node labels and an internal <strong>HW Reservation Service</strong>:</p>
+    <ul>
+      <li>Each bench-attached node carries a label like <code>firmware.corp/bench=bench-A-04</code> and a taint, so only HW workloads land there.</li>
+      <li>Workflows opt in with <code>runs-on: [self-hosted, hw-bench, firmware-productX]</code>.</li>
+      <li>The reservation service serializes access to scarce benches — jobs call <code>hwres acquire</code> / <code>release</code>. Telemetry feeds <a href="https://grafana.com/" target="_blank" rel="noopener">Grafana</a>.</li>
+      <li>Reference: open-source <a href="https://labgrid.readthedocs.io/" target="_blank" rel="noopener">LabGrid</a> is a battle-tested option to integrate with rather than write from scratch.</li>
+    </ul>
+  </article>
+</section>
+
+<section id="runner-pools">
+  <h2>Diagram: runner pool isolation</h2>
+  <p>How CI workloads are physically prevented from consuming CD or HW capacity. Each pool is a separate <a href="https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners-with-actions-runner-controller/deploying-runner-scale-sets-with-actions-runner-controller" target="_blank" rel="noopener">RunnerScaleSet</a> on its own K8s node pool, with <a href="https://kubernetes.io/docs/concepts/policy/resource-quotas/" target="_blank" rel="noopener">ResourceQuotas</a> per team namespace.</p>
+  <div class="diagram">
+    <pre class="mermaid">
+flowchart LR
+  subgraph CIN[CI Node Pool - autoscaling]
+    direction TB
+    subgraph NS_TA[ns runners-ci-teamA - quota 32 vCPU, 128 GiB]
+      RA1[runner pod] -.- RA2[runner pod] -.- RA3[runner pod]
+    end
+    subgraph NS_TB[ns runners-ci-teamB - quota 16 vCPU, 64 GiB]
+      RB1[runner pod] -.- RB2[runner pod]
+    end
+    subgraph NS_TC[ns runners-ci-teamC - quota 8 vCPU, 32 GiB]
+      RC1[runner pod]
+    end
+  end
+
+  subgraph CDN[CD Node Pool - reserved capacity]
+    subgraph NS_CD[ns runners-cd]
+      CD1[runner pod]
+      CD2[runner pod]
+      CD3[runner pod - min replica floor]
+    end
+  end
+
+  subgraph HWN[HW Node Pool - one node per bench]
+    subgraph NS_HW[ns runners-hw]
+      H1[bench-A runner pod]
+      H2[bench-B runner pod]
+      H3[bench-C runner pod]
+    end
+  end
+
+  NP[NetworkPolicy: egress allowlist] -. applies .-> CIN
+  NP -. applies .-> CDN
+  NP -. applies .-> HWN
+  GK[OPA Gatekeeper admission] -. policies .-> CIN
+  GK -. policies .-> CDN
+  GK -. policies .-> HWN
+    </pre>
+  </div>
+  <p class="note">Each team's CI namespace has a hard <a href="https://kubernetes.io/docs/concepts/policy/resource-quotas/" target="_blank" rel="noopener">ResourceQuota</a>; the CD pool's RunnerSet has a minimum-replica floor so a release can always start. <a href="https://kubernetes.io/docs/concepts/services-networking/network-policies/" target="_blank" rel="noopener">NetworkPolicy</a> restricts egress, and <a href="https://open-policy-agent.github.io/gatekeeper/website/docs/" target="_blank" rel="noopener">OPA Gatekeeper</a> rejects pods that escape the runner profile.</p>
+</section>
+
+<section id="gate-sequence">
+  <h2>Diagram: CD gate sequence</h2>
+  <p>What happens between "developer publishes a release" and "firmware actually deploys" — the gating path that replaces Bamboo's release plan.</p>
+  <div class="diagram">
+    <pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant Dev as Developer
+  participant GHES as GHES
+  participant ARC as ARC (K8s)
+  participant CD as CD Runner
+  participant QGS as Quality Gate Svc
+  participant TS as Custom Test Systems
+  participant ENV as Environment Rules
+  participant ORC as Release Orchestrator
+  participant S3 as MinIO/Ceph
+
+  Dev->>GHES: Publish release / tag
+  GHES->>ORC: webhook release.published
+  ORC->>GHES: Create Deployment (production-firmware)
+  GHES->>ENV: Evaluate protection rules
+  ENV-->>GHES: Require check qgs/release-criteria
+  GHES->>ARC: Trigger release workflow
+  ARC->>CD: Schedule CD runner pod
+  CD->>TS: Kick off firmware validation suites
+  TS-->>QGS: POST results /v1/results
+  QGS->>QGS: Evaluate policy (release-policies repo)
+  QGS->>GHES: Publish check run (success/failure)
+  alt All criteria met
+    ENV->>GHES: Allow deployment
+    CD->>S3: Upload signed firmware (object-lock 7y)
+    CD->>ORC: deployment_status = success
+    ORC-->>Dev: Release published
+  else Criteria not met
+    ENV->>GHES: Block deployment
+    ORC-->>Dev: Release blocked + report
+  end
+    </pre>
+  </div>
+</section>
+
+<section id="data">
+  <h2>Diagram: data persistence flow</h2>
+  <p>Every build and release writes to durable storage. Retention policies guarantee CD results remain queryable for years.</p>
+  <div class="diagram">
+    <pre class="mermaid">
+flowchart LR
+  subgraph SRC[Sources]
+    CI[CI Runner]
+    CD[CD Runner]
+    HW[HW Runner]
+    ORC[Release Orchestrator]
+    QGS[Quality Gate Svc]
+    METRICS[ARC + Prometheus exporter]
+  end
+
+  subgraph HOT[Hot storage]
+    S3A[(S3 firmware-releases - 7y object lock)]
+    S3B[(S3 build-artifacts - 1y)]
+    NFS[(NFS labdata - 2y)]
+    PG[(PostgreSQL release metadata - indefinite)]
+    INFLUX[(InfluxDB metrics - 90d hot)]
+  end
+
+  subgraph COLD[Cold archive]
+    GLACIER[(Object storage cold tier)]
+    DOWNS[(Downsampled metrics - forever)]
+  end
+
+  subgraph CONSUME[Consumers]
+    GRAF[Grafana dashboards]
+    ANALYTICS[Analytics / BI]
+    AUDIT[Compliance audit]
+  end
+
+  CI --> S3B
+  CD --> S3A
+  CD --> S3B
+  HW --> NFS
+  ORC --> PG
+  QGS --> PG
+  METRICS --> INFLUX
+
+  S3B -. lifecycle 1y .-> GLACIER
+  INFLUX -. downsample .-> DOWNS
+  NFS -. archive 2y .-> GLACIER
+
+  PG --> GRAF
+  INFLUX --> GRAF
+  S3A --> ANALYTICS
+  S3A --> AUDIT
+  PG --> ANALYTICS
+    </pre>
+  </div>
+  <table>
+    <thead><tr><th>Data</th><th>Store</th><th>Retention</th></tr></thead>
+    <tbody>
+      <tr><td>Firmware binaries, signed manifests</td><td><a href="https://min.io/docs/minio/linux/index.html" target="_blank" rel="noopener">MinIO</a>/<a href="https://docs.ceph.com/en/latest/radosgw/" target="_blank" rel="noopener">Ceph RGW</a></td><td>7 years, <a href="https://min.io/docs/minio/linux/administration/object-management/object-retention.html" target="_blank" rel="noopener">object lock</a></td></tr>
+      <tr><td>Build logs, raw test outputs</td><td>S3 <code>build-artifacts</code></td><td>1 year → cold tier</td></tr>
+      <tr><td>Large HW captures, scope traces</td><td><a href="https://wiki.linux-nfs.org/" target="_blank" rel="noopener">NFS</a> <code>/labdata/&lt;product&gt;/&lt;release&gt;</code></td><td>2 years → archive</td></tr>
+      <tr><td>Release metadata, gates, approvals</td><td><a href="https://www.postgresql.org/docs/" target="_blank" rel="noopener">PostgreSQL</a></td><td>Indefinite</td></tr>
+      <tr><td>Runner utilization, build duration</td><td><a href="https://docs.influxdata.com/" target="_blank" rel="noopener">InfluxDB</a> + <a href="https://prometheus.io/docs/" target="_blank" rel="noopener">Prometheus</a></td><td>90 days hot, downsampled forever</td></tr>
+      <tr><td>Dashboards</td><td><a href="https://grafana.com/docs/" target="_blank" rel="noopener">Grafana</a></td><td>n/a</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="hw-state">
+  <h2>Diagram: HW reservation state machine</h2>
+  <p>How a job acquires and releases a scarce test bench. Prevents two jobs from clobbering the same hardware and emits telemetry for capacity planning.</p>
+  <div class="diagram">
+    <pre class="mermaid">
+stateDiagram-v2
+  [*] --> Requested
+  Requested --> Queued: bench busy
+  Requested --> Acquired: bench free
+  Queued --> Acquired: bench released
+  Queued --> Expired: timeout (configurable)
+  Acquired --> Running: tests start
+  Running --> Released: tests complete
+  Running --> Faulted: bench HW error
+  Faulted --> Released: cleanup
+  Released --> [*]
+  Expired --> [*]
+    </pre>
+  </div>
+  <p class="note">The reservation service exposes <code>hwres acquire --bench=...</code> and <code>hwres release</code> commands that workflows call. State transitions emit events to InfluxDB so utilization, queue depth, and fault rates are observable in Grafana.</p>
+</section>
+
+<section id="governance">
+  <h2>Resource governance — preventing misuse</h2>
+  <p>Six independent layers prevent runners from being used for non-CI/CD compute (the "crypto miner on the build farm" risk):</p>
+  <ol>
+    <li><strong>Ephemeral pod runners</strong> — no persistent state survives a job.</li>
+    <li><strong>Hardened runner image</strong> — only approved toolchains; no <code>apt install</code> at runtime; signed with <a href="https://github.com/sigstore/cosign" target="_blank" rel="noopener">cosign</a>.</li>
+    <li><strong><a href="https://kubernetes.io/docs/concepts/services-networking/network-policies/" target="_blank" rel="noopener">NetworkPolicy</a></strong> on runner namespaces — egress allowlist only to GHES, internal registry, MinIO, and approved services. Public internet blocked.</li>
+    <li><strong><a href="https://open-policy-agent.github.io/gatekeeper/website/docs/" target="_blank" rel="noopener">OPA Gatekeeper</a></strong> admission control — denies pods escaping the runner profile.</li>
+    <li><strong><a href="https://docs.github.com/en/actions/using-workflows/required-workflows" target="_blank" rel="noopener">Required workflows</a></strong> — every run starts with a policy job that fails the run on anti-patterns (long <code>sleep</code>, suspicious binaries).</li>
+    <li><strong>Chargeback dashboards</strong> in Grafana — per-team visibility drives self-regulation.</li>
+  </ol>
+</section>
+
+<section id="concerns">
+  <h2>How each stated concern is resolved</h2>
+  <table class="concerns">
+    <thead><tr><th>Concern</th><th>Resolution</th></tr></thead>
+    <tbody>
+      <tr><td>Heavy CI users starve CD</td><td>Separate ARC RunnerScaleSets on separate K8s node pools + CD floor + per-team ResourceQuotas</td></tr>
+      <tr><td>Runners used for non-CI/CD compute</td><td>Ephemeral pods + hardened image + egress NetworkPolicy + Gatekeeper + Required Workflows</td></tr>
+      <tr><td>CD results not persisted</td><td>MinIO/Ceph object lock 7y + NFS for captures + PostgreSQL for metadata; required composite action enforces upload</td></tr>
+      <tr><td>CD blocked on criteria</td><td>Environment protection requires <code>qgs/release-criteria</code> check; fail-safe</td></tr>
+      <tr><td>HW-pinned execution</td><td>ARC runners on labeled+tainted K8s nodes + HW Reservation Service</td></tr>
+      <tr><td>Developer flexibility</td><td>Anyone authors workflows; constraints applied by org Required Workflows + allowed runner labels</td></tr>
+      <tr><td>On-prem / private network</td><td>GHES, ARC, MinIO, Postgres, Grafana, QGS, HW Reservation all on internal K8s</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="migration">
+  <h2>Migration plan</h2>
+  <p>Staged rollout over ~6–9 months. Do <strong>not</strong> big-bang.</p>
+  <div class="phases">
+    <div class="phase">
+      <h4>Phase 0 — Foundation</h4>
+      <p>4–6 weeks. Stand up GHES, ARC, CI pool for one pilot team, runner image pipeline, MinIO buckets, Grafana dashboards, reusable workflows library.</p>
+    </div>
+    <div class="phase">
+      <h4>Phase 1 — CI parity</h4>
+      <p>6–8 weeks. Migrate one product line's CI. Decompose Bamboo Python scripts into transparent reusable workflows. Run both in parallel for two release cycles.</p>
+    </div>
+    <div class="phase">
+      <h4>Phase 2 — CD + Orchestrator</h4>
+      <p>8–10 weeks. Stand up Release Orchestrator GitHub App, QGS, HW Pool. Migrate one product line's release flow. Keep the Postgres schema; point the new Orchestrator at it.</p>
+    </div>
+    <div class="phase">
+      <h4>Phase 3 — Scale-out</h4>
+      <p>Rolling. Onboard remaining teams one at a time, each cutover gated by their custom test systems being wired into QGS.</p>
+    </div>
+    <div class="phase">
+      <h4>Phase 4 — Decommission</h4>
+      <p>Retire Bamboo and the Spring Boot app once the last product line has moved.</p>
+    </div>
+  </div>
+</section>
+
+<section id="risks">
+  <h2>Risks &amp; mitigations</h2>
+  <table>
+    <thead><tr><th>Risk</th><th>Likelihood</th><th>Impact</th><th>Mitigation</th></tr></thead>
+    <tbody>
+      <tr><td>Opaque Bamboo Python scripts hide behavior</td><td>High</td><td>High</td><td>Phase 1 audit: every script decomposed and documented before re-implementation</td></tr>
+      <tr><td>Custom test systems' formats vary</td><td>Med</td><td>Med</td><td>QGS exposes a stable JSON schema; each system writes a thin adapter</td></tr>
+      <tr><td>HW bench availability becomes the bottleneck</td><td>Med</td><td>High</td><td>Reservation service emits queue-depth metrics → capacity decisions</td></tr>
+      <tr><td>GHES outage halts builds</td><td>Low</td><td>High</td><td><a href="https://docs.github.com/en/enterprise-server@latest/admin/configuration/configuring-your-enterprise/configuring-high-availability-replication-for-a-cluster" target="_blank" rel="noopener">HA replication</a> + DR runbook; release Orchestrator queues retries</td></tr>
+      <tr><td>Developers route around Required Workflows</td><td>Low</td><td>Med</td><td>Org-level required workflows cannot be bypassed by repo admins; audit-log alerting</td></tr>
+      <tr><td>Storage cost growth (7y retention)</td><td>High</td><td>Low</td><td>Tiered: hot S3 → cold object store after 1y; large captures to NFS not S3</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="references">
+  <h2>References</h2>
+
+  <h3>GitHub platform</h3>
+  <ul class="ref">
+    <li><a href="https://docs.github.com/en/enterprise-server@latest" target="_blank" rel="noopener">GitHub Enterprise Server docs</a></li>
+    <li><a href="https://docs.github.com/en/actions" target="_blank" rel="noopener">GitHub Actions docs</a></li>
+    <li><a href="https://docs.github.com/en/actions/using-workflows/reusing-workflows" target="_blank" rel="noopener">Reusable workflows</a></li>
+    <li><a href="https://docs.github.com/en/actions/creating-actions/creating-a-composite-action" target="_blank" rel="noopener">Composite actions</a></li>
+    <li><a href="https://docs.github.com/en/actions/using-workflows/required-workflows" target="_blank" rel="noopener">Required workflows</a></li>
+    <li><a href="https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment" target="_blank" rel="noopener">Environments &amp; protection rules</a></li>
+    <li><a href="https://docs.github.com/en/rest/deployments/deployments" target="_blank" rel="noopener">Deployments REST API</a></li>
+    <li><a href="https://docs.github.com/en/rest/checks/runs" target="_blank" rel="noopener">Checks REST API</a></li>
+    <li><a href="https://docs.github.com/en/apps/creating-github-apps/about-creating-github-apps/about-creating-github-apps" target="_blank" rel="noopener">GitHub Apps</a></li>
+    <li><a href="https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect" target="_blank" rel="noopener">OIDC for Actions</a></li>
+    <li><a href="https://docs.github.com/en/webhooks" target="_blank" rel="noopener">GitHub Webhooks</a></li>
+    <li><a href="https://pages.github.com/" target="_blank" rel="noopener">GitHub Pages</a></li>
+  </ul>
+
+  <h3>Runners &amp; Kubernetes</h3>
+  <ul class="ref">
+    <li><a href="https://github.com/actions/actions-runner-controller" target="_blank" rel="noopener">Actions Runner Controller (ARC)</a></li>
+    <li><a href="https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners-with-actions-runner-controller/deploying-runner-scale-sets-with-actions-runner-controller" target="_blank" rel="noopener">ARC RunnerScaleSets</a></li>
+    <li><a href="https://kubernetes.io/docs/home/" target="_blank" rel="noopener">Kubernetes docs</a></li>
+    <li><a href="https://kubernetes.io/docs/concepts/policy/resource-quotas/" target="_blank" rel="noopener">Kubernetes ResourceQuotas</a></li>
+    <li><a href="https://kubernetes.io/docs/concepts/policy/limit-range/" target="_blank" rel="noopener">Kubernetes LimitRanges</a></li>
+    <li><a href="https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/" target="_blank" rel="noopener">nodeSelector / affinity</a></li>
+    <li><a href="https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/" target="_blank" rel="noopener">Taints &amp; tolerations</a></li>
+    <li><a href="https://kubernetes.io/docs/concepts/services-networking/network-policies/" target="_blank" rel="noopener">NetworkPolicy</a></li>
+    <li><a href="https://open-policy-agent.github.io/gatekeeper/website/docs/" target="_blank" rel="noopener">OPA Gatekeeper</a></li>
+    <li><a href="https://www.openpolicyagent.org/docs/" target="_blank" rel="noopener">Open Policy Agent</a></li>
+    <li><a href="https://github.com/sigstore/cosign" target="_blank" rel="noopener">cosign (image signing)</a></li>
+  </ul>
+
+  <h3>Storage &amp; data</h3>
+  <ul class="ref">
+    <li><a href="https://min.io/docs/minio/linux/index.html" target="_blank" rel="noopener">MinIO</a></li>
+    <li><a href="https://min.io/docs/minio/linux/administration/object-management/object-retention.html" target="_blank" rel="noopener">MinIO object lock / retention</a></li>
+    <li><a href="https://docs.ceph.com/" target="_blank" rel="noopener">Ceph</a></li>
+    <li><a href="https://docs.ceph.com/en/latest/radosgw/" target="_blank" rel="noopener">Ceph RADOS Gateway (S3)</a></li>
+    <li><a href="https://www.postgresql.org/docs/" target="_blank" rel="noopener">PostgreSQL</a></li>
+    <li><a href="https://docs.influxdata.com/" target="_blank" rel="noopener">InfluxDB</a></li>
+    <li><a href="https://prometheus.io/docs/" target="_blank" rel="noopener">Prometheus</a></li>
+    <li><a href="https://grafana.com/docs/" target="_blank" rel="noopener">Grafana</a></li>
+    <li><a href="https://wiki.linux-nfs.org/wiki/index.php/Main_Page" target="_blank" rel="noopener">NFS</a></li>
+  </ul>
+
+  <h3>Legacy &amp; tooling</h3>
+  <ul class="ref">
+    <li><a href="https://www.atlassian.com/software/bamboo" target="_blank" rel="noopener">Atlassian Bamboo</a></li>
+    <li><a href="https://spring.io/projects/spring-boot" target="_blank" rel="noopener">Spring Boot</a></li>
+    <li><a href="https://labgrid.readthedocs.io/" target="_blank" rel="noopener">LabGrid (HW automation)</a></li>
+    <li><a href="https://mermaid.js.org/" target="_blank" rel="noopener">Mermaid diagrams</a></li>
+  </ul>
+</section>
+
+<footer>
+  <p>Architecture plan v1 · Rendered with <a href="https://mermaid.js.org/" target="_blank" rel="noopener">Mermaid</a> · <a href="architecture-plan.md">Source markdown</a></p>
+</footer>
+
+</main>
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'default',
+    securityLevel: 'loose',
+    flowchart: { htmlLabels: true, curve: 'basis' },
+    sequence: { showSequenceNumbers: true }
+  });
+</script>
+
+</body>
+</html>

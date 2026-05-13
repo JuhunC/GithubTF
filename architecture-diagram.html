@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Firmware CI/CD Architecture Diagram</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 24px; background: #fafafa; color: #222; }
+  h1 { margin: 0 0 4px 0; font-size: 20px; }
+  .sub { color: #666; margin-bottom: 20px; font-size: 13px; }
+  .diagram { background: white; padding: 24px; border: 1px solid #e5e5e5; border-radius: 8px; overflow: auto; }
+  .note { margin-top: 16px; font-size: 12px; color: #888; }
+  .mermaid { font-size: 14px; }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+  <h1>Firmware CI/CD Architecture</h1>
+  <div class="sub">GitHub Enterprise Server (on-prem) + ARC on Kubernetes</div>
+
+  <div class="diagram">
+    <pre class="mermaid">
+flowchart TB
+  subgraph DEV[Developers]
+    D1[Push / PR]
+  end
+
+  subgraph GHES[GitHub Enterprise Server - on-prem]
+    REPO[Repos and Workflows]
+    ENV[Environments and Protection Rules]
+    APP[Release Orchestrator GitHub App]
+    REQW[Required Workflows org policy]
+  end
+
+  subgraph K8S[Kubernetes Cluster]
+    ARC[Actions Runner Controller]
+    subgraph POOLS[Runner Pools - separated]
+      CIP[CI Pool - ephemeral pods per team namespace]
+      CDP[CD Pool - restricted, signed workflows only]
+      HWP[HW Pool - pinned to test benches]
+    end
+    QGS[Quality Gate Service]
+    HWS[HW Reservation Service]
+    OPA[OPA Gatekeeper - policy admission]
+  end
+
+  subgraph HW[Lab - HW-in-the-loop]
+    BENCH1[Test Bench A]
+    BENCH2[Test Bench B]
+    BENCHN[Test Bench N]
+  end
+
+  subgraph DATA[Data and Persistence]
+    S3[S3 - MinIO Ceph - firmware artifacts and logs]
+    NFS[NFS - large captures and traces]
+    PG[(PostgreSQL - release metadata)]
+    INFLUX[(InfluxDB - time-series metrics)]
+    GRAF[Grafana dashboards]
+  end
+
+  subgraph TEST[Custom Test Systems]
+    TS1[Unit and Integration]
+    TS2[Firmware Validation]
+    TS3[Compliance and Safety]
+  end
+
+  D1 --> REPO
+  REPO -->|workflow_run| ARC
+  REQW -. enforces .-> REPO
+  ARC --> CIP
+  ARC --> CDP
+  ARC --> HWP
+  HWP <--> HWS
+  HWS <--> BENCH1
+  HWS <--> BENCH2
+  HWS <--> BENCHN
+  CIP --> S3
+  CDP --> S3
+  HWP --> NFS
+  CDP -->|deployment event| APP
+  APP --> ENV
+  APP --> PG
+  APP --> QGS
+  TEST -->|results webhook| QGS
+  QGS -->|commit status / deployment review| ENV
+  ENV -->|approve or block| CDP
+  ARC -->|metrics| INFLUX
+  OPA -. admission .-> POOLS
+  INFLUX --> GRAF
+  PG --> GRAF
+    </pre>
+  </div>
+
+  <div class="note">
+    If the diagram does not render, your browser may be blocked from reaching cdn.jsdelivr.net.
+    In that case, paste the Mermaid source above into <a href="https://mermaid.live" target="_blank">mermaid.live</a>
+    or use a Mermaid-aware viewer (VS Code "Markdown Preview Mermaid Support" extension, Obsidian, Typora, GitHub web UI).
+  </div>
+
+<script>
+  mermaid.initialize({ startOnLoad: true, theme: 'default', flowchart: { htmlLabels: true, curve: 'basis' } });
+</script>
+</body>
+</html>
