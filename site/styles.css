@@ -91,6 +91,21 @@ body {
 }
 .topnav a:hover { color: var(--accent); background: var(--accent-soft); }
 
+.lang-btn {
+  display: inline-flex; align-items: center;
+  padding: 5px 13px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg-soft);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background .15s, color .15s, border-color .15s;
+}
+.lang-btn:hover { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); text-decoration: none; }
+
 /* ── Layout ─────────────────────────────────────────────────────────────── */
 .layout {
   max-width: 1440px;
