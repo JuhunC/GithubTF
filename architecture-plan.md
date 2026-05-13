@@ -9,13 +9,14 @@
 
 We are replacing a heavily customized Bamboo + Spring Boot release system with a GitHub-native CI/CD platform. The new design must (a) give developers freedom to define their own pipelines, (b) prevent CI workloads from starving CD, (c) prevent runner misuse for non-CI/CD compute, (d) permanently persist CD/release results for analytics, and (e) enforce release-gating criteria sourced from existing custom test systems.
 
-The architecture rests on five pillars:
+The architecture rests on six pillars:
 
 1. **GitHub Enterprise Server (GHES)** as the SCM and workflow engine.
 2. **Actions Runner Controller (ARC) on Kubernetes** with strictly separated runner pools (CI / CD / HW-in-the-loop) and per-team namespaces with ResourceQuotas.
-3. **A GitHub-native Release Orchestrator** built from a GitHub App, Environments, Deployments API, and a thin custom service — replacing the Spring Boot app entirely.
-4. **A Quality Gate Service** that fronts the custom test systems and publishes commit/deployment statuses that GitHub's Environment protection rules consume.
-5. **A Results & Analytics Pipeline** persisting artifacts to S3-compatible storage (MinIO/Ceph), structured metadata to PostgreSQL, large captures to NFS, and metrics to InfluxDB/Prometheus.
+3. **A Release Orchestrator GitHub App on a dedicated server** (the host that previously ran the Spring Boot app, or a fresh VM) — sits outside Kubernetes for blast-radius isolation from the runner platform.
+4. **An Apache Kafka cluster** as the high-throughput message bus connecting GitHub Actions, custom test systems, the Quality Gate Service, the Release Orchestrator, and analytics consumers — decouples producers from consumers and absorbs bursts.
+5. **A Quality Gate Service** that consumes test results from Kafka and publishes commit/deployment statuses that GitHub's Environment protection rules consume. **GitHub Action workflows trigger** the custom test systems directly; the test systems publish results back through Kafka.
+6. **A Results & Analytics Pipeline** persisting artifacts to S3-compatible storage (MinIO/Ceph), structured metadata to PostgreSQL, large captures to NFS, and metrics to InfluxDB/Prometheus.
 
 ---
 
@@ -47,15 +48,25 @@ flowchart TB
   subgraph GHES[GitHub Enterprise Server - on-prem]
     REPO[Repos and Workflows]
     ENV[Environments and Protection Rules]
-    APP[Release Orchestrator GitHub App]
     REQW[Required Workflows org policy]
+  end
+
+  subgraph ORC_SRV[Release Orchestrator Server - dedicated VM]
+    APP[Release Orchestrator GitHub App]
+  end
+
+  subgraph KAFKA[Kafka Cluster - high-throughput bus]
+    K_TR[topic: test.results]
+    K_DE[topic: deployment.events]
+    K_RL[topic: release.lifecycle]
+    K_AU[topic: audit and metrics]
   end
 
   subgraph K8S[Kubernetes Cluster]
     ARC[Actions Runner Controller]
     subgraph POOLS[Runner Pools - separated]
-      CIP[CI Pool - ephemeral pods per team namespace]
-      CDP[CD Pool - restricted, signed workflows only]
+      CIP[CI Pool - ephemeral pods]
+      CDP[CD Pool - restricted, signed workflows]
       HWP[HW Pool - pinned to test benches]
     end
     QGS[Quality Gate Service]
@@ -69,18 +80,18 @@ flowchart TB
     BENCHN[Test Bench N]
   end
 
+  subgraph TEST[Custom Test Systems]
+    TS1[Unit and Integration]
+    TS2[Firmware Validation]
+    TS3[Compliance and Safety]
+  end
+
   subgraph DATA[Data and Persistence]
     S3[S3 - MinIO Ceph - firmware artifacts and logs]
     NFS[NFS - large captures and traces]
     PG[(PostgreSQL - release metadata)]
     INFLUX[(InfluxDB - time-series metrics)]
     GRAF[Grafana dashboards]
-  end
-
-  subgraph TEST[Custom Test Systems]
-    TS1[Unit and Integration]
-    TS2[Firmware Validation]
-    TS3[Compliance and Safety]
   end
 
   D1 --> REPO
@@ -90,21 +101,31 @@ flowchart TB
   ARC --> CDP
   ARC --> HWP
   HWP <--> HWS
-  HWS <--> BENCH1 & BENCH2 & BENCHN
+  HWS <--> BENCH1
+  HWS <--> BENCH2
+  HWS <--> BENCHN
   CIP --> S3
   CDP --> S3
   HWP --> NFS
-  CDP -->|deployment event| APP
+  CDP -->|HTTP trigger test runs| TEST
+  HWP -->|HTTP trigger HW tests| TEST
+  TEST -->|publish results| K_TR
+  K_TR --> QGS
+  QGS -->|check run| ENV
+  ENV -->|approve or block| CDP
+  GHES -->|webhooks release, deployment| APP
   APP --> ENV
   APP --> PG
-  APP --> QGS
-  TEST -->|results webhook| QGS
-  QGS -->|commit status / deployment review| ENV
-  ENV -->|approve or block| CDP
+  APP --> K_RL
+  APP --> K_DE
+  K_DE --> ORC_SRV
+  CDP -->|deployment_status| K_DE
   ARC -->|metrics| INFLUX
+  ARC --> K_AU
   OPA -. admission .-> POOLS
   INFLUX --> GRAF
   PG --> GRAF
+  K_AU --> INFLUX
 ```
 
 ---
@@ -138,37 +159,50 @@ Separating CI and CD into independent ARC RunnerScaleSets — and into separate 
 
 **Custom runner images:** Maintained centrally, hardened, with only approved toolchains. Built nightly, signed with cosign, pulled from an internal registry. This is how we prevent R3 — a developer cannot install arbitrary tooling on the runner; if they need something new, they raise a PR against the runner image repo.
 
-### 4.3 Release Orchestrator (replaces Spring Boot app)
+### 4.3 Release Orchestrator (dedicated server, replaces Spring Boot app)
 
-A small GitHub-native service that owns the release lifecycle. Built as:
+A GitHub-native service that owns the release lifecycle. Hosted on a **dedicated server** (the same VM that previously ran the Spring Boot release app, or a fresh equivalent VM) — explicitly **not** in the Kubernetes runner cluster. This separation is intentional:
+
+- **Blast-radius isolation.** A K8s cluster issue (upgrade, networking, ARC bug) cannot also bring down the release control plane. The orchestrator can still record release state and serve audits even if runners are unavailable.
+- **Stable network identity.** The orchestrator has a fixed hostname/IP for GHES webhook delivery and inbound calls from operators — no churn from pod restarts.
+- **Lift-and-shift path.** If the team keeps Spring Boot expertise (Java) the new service can ship on the same host, reusing existing OS configuration, monitoring agents, and backup policy.
+
+**Composition:**
 
 - A **GitHub App** installed org-wide (`deployments`, `statuses`, `checks`, `actions` permissions).
-- A thin backend (Go/Java — your choice; keep the team's Spring Boot expertise if you like) deployed on the same K8s cluster.
-- State stored in PostgreSQL (the same schema the Spring Boot app used can be migrated forward).
+- A backend service (Java / Spring Boot is acceptable; Go also a fine choice for a fresh build).
+- State stored in PostgreSQL (the same schema the legacy Spring Boot app used can be migrated forward).
+- Consumes from and produces to the **Kafka cluster** (topics `release.lifecycle`, `deployment.events`) so it scales horizontally and integrates with downstream analytics without point-to-point coupling.
 
 **Responsibilities:**
 
 1. Listen to `release.published` and `deployment.created` webhooks from GHES.
 2. Create a `firmware_release` row in PostgreSQL with metadata (commit SHA, version, target HW, requester).
-3. Create a GitHub **Deployment** against the `production-firmware` Environment — this triggers the protection rules and required reviewers.
-4. Consume `deployment_status` updates and `check_run` results from CI and from the Quality Gate Service.
-5. When all gates pass, mark the deployment `success` and persist final artifacts to S3 with retention policy `compliance-7y`.
-6. Expose a small read API + Grafana dashboards over the `firmware_release` table.
+3. Publish a `release.lifecycle` event to Kafka.
+4. Create a GitHub **Deployment** against the `production-firmware` Environment — this triggers the protection rules and required reviewers.
+5. Consume `deployment.events` from Kafka (emitted by CD runners) and `check_run` results from CI and the Quality Gate Service.
+6. When all gates pass, mark the deployment `success` and confirm artifacts in S3 are tagged with retention policy `compliance-7y`.
+7. Expose a small read API + Grafana dashboards over the `firmware_release` table.
 
 This is intentionally smaller than the legacy Spring Boot app because the orchestration logic (which Python scripts in Bamboo encoded opaquely) is now expressed as **transparent, version-controlled YAML workflows** that developers can read.
 
 ### 4.4 Quality Gate Service (CD blocking — R5)
 
-A standalone service whose only job is to translate results from your custom test systems into GitHub commit statuses / check runs / deployment reviews.
+A standalone service whose only job is to translate test results into GitHub commit statuses / check runs / deployment reviews.
 
 **Flow:**
 
-1. Custom test systems POST results to `https://qgs.internal/v1/results` with the release ID and commit SHA.
-2. QGS evaluates results against the **release criteria policy** (a YAML doc per product line, stored in a `release-policies` repo — versioned, reviewed).
-3. QGS calls the GitHub Checks API to publish a check run with `conclusion: success | failure`.
-4. The `production-firmware` Environment has a required check on `qgs/release-criteria` — if it's not `success`, the deployment is **automatically blocked** by GitHub's own protection rules. No Spring Boot logic needed.
+1. The CD or HW GitHub Actions workflow **explicitly triggers** the relevant custom test systems via authenticated HTTP calls (e.g., `POST https://firmware-validation.internal/runs`). The workflow passes the release ID, commit SHA, target HW, and a callback correlation ID.
+2. Each custom test system runs its suite asynchronously and **publishes results to the Kafka topic `test.results`** when finished. Results carry the correlation ID so consumers can join them to the release.
+3. QGS consumes `test.results` from Kafka and evaluates them against the **release criteria policy** (a YAML doc per product line, stored in a `release-policies` repo — versioned, reviewed).
+4. QGS calls the GitHub Checks API to publish a check run with `conclusion: success | failure` on the release commit.
+5. The `production-firmware` Environment has a required check on `qgs/release-criteria` — if it's not `success`, the deployment is **automatically blocked** by GitHub's own protection rules. No Spring Boot logic needed.
 
-**Why this design:** The blocking is enforced by GitHub itself, not by our service. If the QGS is down, the gate stays closed (fail-safe). The policy YAML makes the criteria explicit and auditable.
+**Why pull (Kafka) instead of push (HTTP webhook)?** With 300+ developers and 5,000+ builds/day, test result volume bursts unpredictably. Kafka decouples test systems from QGS, absorbs bursts, lets us add more QGS replicas, and gives analytics and audit a copy of the same stream — without test systems needing to know about new consumers.
+
+**Why GitHub-triggered tests instead of always-on test pipelines?** It puts each workflow in full control of which test systems matter for its release path, and keeps the test inventory readable as code in the workflow file. The workflow can also wait on the resulting check run before declaring success.
+
+**Why this design is fail-safe:** The blocking is enforced by GitHub itself, not by our service. If the QGS is down or Kafka is congested, the check never turns green and the gate stays closed. The policy YAML makes the criteria explicit and auditable.
 
 ### 4.5 HW-in-the-Loop Runners (R6)
 
@@ -180,7 +214,27 @@ The Bamboo "agents pinned to HW" model maps cleanly onto ARC with custom node la
 
 **HW Reservation Service:** Because benches are scarce and jobs queue, a small reservation service in front of the HW pool handles fairness. The runner's job calls `hwres acquire --bench=bench-A` at the start of the job and `hwres release` at the end. This prevents two simultaneous jobs from clobbering the same bench, and provides telemetry on utilization.
 
-### 4.6 Data & Persistence Layer (R4 — permanent CD results)
+### 4.6 Kafka Message Bus (high-throughput backbone)
+
+An on-prem [Apache Kafka](https://kafka.apache.org/) cluster (3–5 brokers) is the asynchronous backbone connecting Actions runners, custom test systems, the Release Orchestrator, the Quality Gate Service, and analytics consumers. It exists because, at 5,000+ builds/day plus per-step test results, point-to-point HTTP between components becomes a coupling and capacity nightmare — bursts overwhelm receivers, downtime in one component blocks the pipeline, and adding new consumers (analytics, audit, ML) means changing every producer.
+
+**Core topics:**
+
+| Topic | Producers | Consumers | Retention |
+|---|---|---|---|
+| `test.results` | Custom test systems | Quality Gate Service, Analytics, Audit | 14 days hot, archived to S3 |
+| `deployment.events` | CD runners, Release Orchestrator | Release Orchestrator, Grafana exporter, Audit | 30 days |
+| `release.lifecycle` | Release Orchestrator | Analytics, BI, Audit | 90 days |
+| `audit` | All services (auth, policy, gate decisions) | SIEM, long-term audit store | 7 years (archived) |
+| `metrics.runners` | ARC exporter | InfluxDB sink | 7 days |
+
+**Why Kafka specifically:** persistent log semantics (consumers can replay), high throughput, mature on-prem story (no SaaS dependency on a private network), and broad ecosystem support — Kafka Connect can sink results directly to S3 / PostgreSQL / InfluxDB without writing glue code. A managed alternative such as [Redpanda](https://redpanda.com/) is wire-compatible with Kafka and lighter to operate; the architecture choice is independent of the brand.
+
+**Schema discipline:** Every topic has a registered schema in [Confluent Schema Registry](https://docs.confluent.io/platform/current/schema-registry/index.html) (or [Apicurio](https://www.apicur.io/registry/) — both run on-prem). Avro/Protobuf — not free-form JSON — so consumers (especially QGS) can rely on field shapes.
+
+**Failure modes:** Producers buffer locally with exponential backoff if Kafka is unreachable; consumers commit offsets only after successful processing. QGS uses idempotent processing so a replay never produces a duplicate check run.
+
+### 4.7 Data & Persistence Layer (R4 — permanent CD results)
 
 | Data | Store | Retention |
 |---|---|---|
@@ -193,7 +247,7 @@ The Bamboo "agents pinned to HW" model maps cleanly onto ARC with custom node la
 
 A reusable `actions/upload-firmware-release@v1` composite action handles uploads in a uniform, signed manner. CD workflows are required (via `RequiredWorkflows`) to call this action so we cannot have a "release" that didn't persist its artifacts.
 
-### 4.7 Policy & Governance (R3)
+### 4.8 Policy & Governance (R3)
 
 Several layers prevent runner misuse:
 

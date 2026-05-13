@@ -47,6 +47,7 @@
     </li>
     <li><a href="#runner-pools">Runner pool isolation</a></li>
     <li><a href="#gate-sequence">CD gate sequence</a></li>
+    <li><a href="#kafka-topics">Kafka topology</a></li>
     <li><a href="#data">Data persistence</a></li>
     <li><a href="#hw-state">HW reservation states</a></li>
     <li><a href="#governance">Resource governance</a></li>
@@ -62,11 +63,12 @@
 <section id="overview">
   <h1>Firmware CI/CD on GitHub Enterprise</h1>
   <p class="lede">
-    Replacing <a href="https://www.atlassian.com/software/bamboo" target="_blank" rel="noopener">Atlassian Bamboo</a> + Bitbucket + a custom Spring Boot release app with a GitHub-native CI/CD platform running on
+    Replacing <a href="https://www.atlassian.com/software/bamboo" target="_blank" rel="noopener">Atlassian Bamboo</a> + Bitbucket + a custom Spring Boot release app with a GitHub-native CI/CD platform built on
     <a href="https://docs.github.com/en/enterprise-server@latest" target="_blank" rel="noopener">GitHub Enterprise Server (GHES)</a>,
-    <a href="https://docs.github.com/en/actions" target="_blank" rel="noopener">GitHub Actions</a>, and the
-    <a href="https://github.com/actions/actions-runner-controller" target="_blank" rel="noopener">Actions Runner Controller (ARC)</a>
-    on Kubernetes — designed for 300+ developers, 5,000+ builds/day, with hardware-in-the-loop firmware testing.
+    <a href="https://docs.github.com/en/actions" target="_blank" rel="noopener">GitHub Actions</a>, the
+    <a href="https://github.com/actions/actions-runner-controller" target="_blank" rel="noopener">Actions Runner Controller (ARC)</a> on Kubernetes,
+    an <a href="https://kafka.apache.org/" target="_blank" rel="noopener">Apache Kafka</a> message backbone,
+    and a Release Orchestrator GitHub App hosted on a dedicated server — designed for 300+ developers, 5,000+ builds/day, with hardware-in-the-loop firmware testing.
   </p>
 
   <div class="pill-row">
@@ -83,8 +85,8 @@
       <p>CI / CD / HW are <strong>physically separated</strong> ARC <a href="https://docs.github.com/en/actions/hosting-your-own-runners/managing-self-hosted-runners-with-actions-runner-controller/deploying-runner-scale-sets-with-actions-runner-controller" target="_blank" rel="noopener">RunnerScaleSets</a> on different K8s node pools — CI cannot starve CD.</p>
     </div>
     <div class="card">
-      <h4>Replace the Spring Boot app</h4>
-      <p>A GitHub App + <a href="https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment" target="_blank" rel="noopener">Environments</a> + the <a href="https://docs.github.com/en/rest/deployments/deployments" target="_blank" rel="noopener">Deployments API</a> replace the legacy orchestrator. Opaque Bamboo Python scripts become reviewable YAML.</p>
+      <h4>Workflows trigger the tests</h4>
+      <p>The CD/HW GitHub Actions workflow <strong>explicitly triggers</strong> each custom test system via authenticated HTTP. Test systems publish results back through Kafka — no opaque coupling.</p>
     </div>
     <div class="card">
       <h4>Fail-safe CD gating</h4>
@@ -93,6 +95,14 @@
     <div class="card">
       <h4>Permanent results</h4>
       <p>Firmware binaries land in <a href="https://min.io/docs/minio/linux/index.html" target="_blank" rel="noopener">MinIO</a>/<a href="https://docs.ceph.com/" target="_blank" rel="noopener">Ceph</a> with <a href="https://min.io/docs/minio/linux/administration/object-management/object-retention.html" target="_blank" rel="noopener">object lock</a> for 7 years; metadata in <a href="https://www.postgresql.org/docs/" target="_blank" rel="noopener">PostgreSQL</a>; metrics in <a href="https://docs.influxdata.com/" target="_blank" rel="noopener">InfluxDB</a> + <a href="https://grafana.com/docs/" target="_blank" rel="noopener">Grafana</a>.</p>
+    </div>
+    <div class="card">
+      <h4>Kafka backbone</h4>
+      <p><a href="https://kafka.apache.org/" target="_blank" rel="noopener">Apache Kafka</a> decouples producers from consumers: test systems, runners, Orchestrator, and analytics all communicate through versioned topics with replay and burst absorption.</p>
+    </div>
+    <div class="card">
+      <h4>Orchestrator on its own server</h4>
+      <p>The Release Orchestrator GitHub App runs on a <strong>dedicated VM</strong> (replacing the Spring Boot host) — outside K8s — so a runner-cluster issue cannot bring down the release control plane.</p>
     </div>
   </div>
 </section>
@@ -127,8 +137,18 @@ flowchart TB
   subgraph GHES[GitHub Enterprise Server]
     REPO[Repos and Workflows]
     ENV[Environments and Protection Rules]
-    APP[Release Orchestrator GitHub App]
     REQW[Required Workflows org policy]
+  end
+
+  subgraph ORC_SRV[Release Orchestrator Server - dedicated VM]
+    APP[Release Orchestrator GitHub App]
+  end
+
+  subgraph KAFKA[Kafka Cluster - high-throughput bus]
+    K_TR[topic: test.results]
+    K_DE[topic: deployment.events]
+    K_RL[topic: release.lifecycle]
+    K_AU[topic: audit]
   end
 
   subgraph K8S[Kubernetes Cluster]
@@ -149,18 +169,18 @@ flowchart TB
     BENCHN[Test Bench N]
   end
 
+  subgraph TEST[Custom Test Systems]
+    TS1[Unit/Integration]
+    TS2[Firmware Validation]
+    TS3[Compliance/Safety]
+  end
+
   subgraph DATA[Data and Persistence]
     S3[S3 MinIO/Ceph]
     NFS[NFS captures]
     PG[(PostgreSQL)]
     INFLUX[(InfluxDB)]
     GRAF[Grafana]
-  end
-
-  subgraph TEST[Custom Test Systems]
-    TS1[Unit/Integration]
-    TS2[Firmware Validation]
-    TS3[Compliance/Safety]
   end
 
   D1 --> REPO
@@ -176,14 +196,21 @@ flowchart TB
   CIP --> S3
   CDP --> S3
   HWP --> NFS
-  CDP -->|deployment event| APP
-  APP --> ENV
-  APP --> PG
-  APP --> QGS
-  TEST -->|results webhook| QGS
+  CDP -->|HTTP trigger tests| TEST
+  HWP -->|HTTP trigger HW tests| TEST
+  TEST -->|publish results| K_TR
+  K_TR --> QGS
   QGS -->|check run| ENV
   ENV -->|approve or block| CDP
+  GHES -->|webhooks release, deployment| APP
+  APP --> ENV
+  APP --> PG
+  APP --> K_RL
+  APP --> K_DE
+  CDP --> K_DE
+  K_DE --> APP
   ARC -->|metrics| INFLUX
+  ARC --> K_AU
   OPA -. admission .-> POOLS
   INFLUX --> GRAF
   PG --> GRAF
@@ -227,27 +254,37 @@ flowchart TB
   </article>
 
   <article id="c-orch" class="component">
-    <h3>Release Orchestrator (replaces Spring Boot)</h3>
-    <p>A small <a href="https://docs.github.com/en/apps/creating-github-apps/about-creating-github-apps/about-creating-github-apps" target="_blank" rel="noopener">GitHub App</a> with a thin backend on the same Kubernetes cluster. Responsibilities:</p>
+    <h3>Release Orchestrator — dedicated server (replaces Spring Boot)</h3>
+    <p>A <a href="https://docs.github.com/en/apps/creating-github-apps/about-creating-github-apps/about-creating-github-apps" target="_blank" rel="noopener">GitHub App</a> hosted on a <strong>dedicated server</strong> — the same VM that previously ran the Spring Boot release app, or a fresh equivalent. Explicitly <strong>not</strong> inside the K8s runner cluster.</p>
+    <p><strong>Why it lives outside Kubernetes:</strong></p>
+    <ul>
+      <li><strong>Blast-radius isolation.</strong> A cluster upgrade, ARC bug, or networking issue cannot also take down the release control plane.</li>
+      <li><strong>Stable network identity.</strong> Fixed hostname/IP for GHES webhooks and operator access — no pod-restart churn.</li>
+      <li><strong>Lift-and-shift path.</strong> Reuses existing OS configuration, monitoring agents, and backup policy of the legacy host.</li>
+    </ul>
+    <p>It produces to and consumes from <a href="https://kafka.apache.org/" target="_blank" rel="noopener">Kafka</a> (topics <code>release.lifecycle</code> and <code>deployment.events</code>) so it scales horizontally and decouples from analytics consumers. Responsibilities:</p>
     <ol>
       <li>Listen for <a href="https://docs.github.com/en/webhooks/webhook-events-and-payloads#release" target="_blank" rel="noopener"><code>release.published</code></a> and <a href="https://docs.github.com/en/webhooks/webhook-events-and-payloads#deployment" target="_blank" rel="noopener"><code>deployment.created</code></a> webhooks.</li>
       <li>Create a <code>firmware_release</code> row in PostgreSQL with commit SHA, version, target HW, requester.</li>
+      <li>Publish a <code>release.lifecycle</code> event to Kafka.</li>
       <li>Open a GitHub <a href="https://docs.github.com/en/rest/deployments/deployments" target="_blank" rel="noopener">Deployment</a> on the <code>production-firmware</code> Environment, triggering protection rules.</li>
-      <li>Consume <a href="https://docs.github.com/en/rest/checks/runs" target="_blank" rel="noopener">check runs</a> and <a href="https://docs.github.com/en/rest/commits/statuses" target="_blank" rel="noopener">commit statuses</a> from CI and from the Quality Gate Service.</li>
-      <li>On success, persist final artifacts to S3 with <a href="https://min.io/docs/minio/linux/administration/object-management/object-retention.html" target="_blank" rel="noopener">object lock</a> (<code>compliance-7y</code>).</li>
+      <li>Consume <code>deployment.events</code> from Kafka (emitted by CD runners) plus <a href="https://docs.github.com/en/rest/checks/runs" target="_blank" rel="noopener">check runs</a> from CI/QGS.</li>
+      <li>On success, confirm S3 artifacts are tagged for <a href="https://min.io/docs/minio/linux/administration/object-management/object-retention.html" target="_blank" rel="noopener">object lock</a> (<code>compliance-7y</code>).</li>
     </ol>
     <p>The orchestration logic that Bamboo encoded in opaque Python scripts now lives as <strong>transparent, version-controlled YAML workflows</strong> developers can read.</p>
   </article>
 
   <article id="c-qgs" class="component">
     <h3>Quality Gate Service (CD blocker)</h3>
-    <p>Translates results from your custom test systems into GitHub <a href="https://docs.github.com/en/rest/checks/runs" target="_blank" rel="noopener">check runs</a>. Blocking is enforced by GitHub itself — if QGS is down, the gate stays closed (fail-safe).</p>
+    <p>Translates test results into GitHub <a href="https://docs.github.com/en/rest/checks/runs" target="_blank" rel="noopener">check runs</a>. Blocking is enforced by GitHub itself — if QGS is down or Kafka is congested, the check never turns green and the gate stays closed (fail-safe).</p>
     <ol>
-      <li>Test systems POST results to <code>https://qgs.internal/v1/results</code>.</li>
-      <li>QGS evaluates against per-product release criteria (versioned YAML in a <code>release-policies</code> repo).</li>
-      <li>QGS publishes <code>qgs/release-criteria</code> check with <code>success | failure</code>.</li>
+      <li>The CD/HW <strong>GitHub Actions workflow explicitly triggers</strong> each relevant custom test system via authenticated HTTP (e.g., <code>POST https://firmware-validation.internal/runs</code>) with the release ID, commit SHA, target HW, and a callback correlation ID.</li>
+      <li>Test systems run asynchronously and <strong>publish results to Kafka topic <code>test.results</code></strong> when complete, carrying the correlation ID.</li>
+      <li>QGS consumes <code>test.results</code> and evaluates against per-product release criteria (versioned YAML in a <code>release-policies</code> repo).</li>
+      <li>QGS publishes the <code>qgs/release-criteria</code> check with <code>success | failure</code>.</li>
       <li>The <code>production-firmware</code> Environment requires that check — no status = blocked.</li>
     </ol>
+    <p class="note"><strong>Why pull from Kafka instead of HTTP webhooks?</strong> 5,000+ builds/day means bursty result volume. Kafka decouples test systems from QGS, absorbs bursts, scales QGS replicas independently, and gives analytics/audit a copy of the same stream — without test systems needing to know about new consumers.</p>
   </article>
 
   <article id="c-hw" class="component">
@@ -317,36 +354,107 @@ sequenceDiagram
   autonumber
   participant Dev as Developer
   participant GHES as GHES
+  participant ORC as Release Orchestrator<br/>(dedicated server)
   participant ARC as ARC (K8s)
   participant CD as CD Runner
-  participant QGS as Quality Gate Svc
   participant TS as Custom Test Systems
+  participant KAF as Kafka
+  participant QGS as Quality Gate Svc
   participant ENV as Environment Rules
-  participant ORC as Release Orchestrator
   participant S3 as MinIO/Ceph
 
   Dev->>GHES: Publish release / tag
   GHES->>ORC: webhook release.published
+  ORC->>KAF: publish release.lifecycle
   ORC->>GHES: Create Deployment (production-firmware)
   GHES->>ENV: Evaluate protection rules
   ENV-->>GHES: Require check qgs/release-criteria
   GHES->>ARC: Trigger release workflow
   ARC->>CD: Schedule CD runner pod
-  CD->>TS: Kick off firmware validation suites
-  TS-->>QGS: POST results /v1/results
+  CD->>TS: HTTP trigger firmware validation suites
+  TS-->>CD: 202 Accepted (run IDs)
+  TS->>KAF: Publish results to test.results
+  KAF->>QGS: Consume test.results
   QGS->>QGS: Evaluate policy (release-policies repo)
   QGS->>GHES: Publish check run (success/failure)
   alt All criteria met
     ENV->>GHES: Allow deployment
     CD->>S3: Upload signed firmware (object-lock 7y)
-    CD->>ORC: deployment_status = success
+    CD->>KAF: publish deployment.events
+    KAF->>ORC: consume deployment.events
     ORC-->>Dev: Release published
   else Criteria not met
     ENV->>GHES: Block deployment
+    CD->>KAF: publish deployment.events (blocked)
+    KAF->>ORC: consume deployment.events
     ORC-->>Dev: Release blocked + report
   end
     </pre>
   </div>
+</section>
+
+<section id="kafka-topics">
+  <h2>Diagram: Kafka topology</h2>
+  <p><a href="https://kafka.apache.org/" target="_blank" rel="noopener">Apache Kafka</a> is the high-throughput backbone. Producers (runners, test systems, Orchestrator) and consumers (QGS, Orchestrator, analytics, audit) are decoupled through versioned topics. Schemas are registered in <a href="https://docs.confluent.io/platform/current/schema-registry/index.html" target="_blank" rel="noopener">Schema Registry</a> (or <a href="https://www.apicur.io/registry/" target="_blank" rel="noopener">Apicurio</a>) so consumers can rely on field shapes.</p>
+  <div class="diagram">
+    <pre class="mermaid">
+flowchart LR
+  subgraph PROD[Producers]
+    TS[Custom Test Systems]
+    CDR[CD Runner]
+    HWR[HW Runner]
+    ORC[Release Orchestrator]
+    AUTH[Auth and policy events]
+    ARC[ARC exporter]
+  end
+
+  subgraph KAF[Kafka Cluster - 3 to 5 brokers]
+    T1[test.results - 14d]
+    T2[deployment.events - 30d]
+    T3[release.lifecycle - 90d]
+    T4[audit - 7y archived]
+    T5[metrics.runners - 7d]
+  end
+
+  subgraph CONS[Consumers]
+    QGS[Quality Gate Service]
+    ORC2[Release Orchestrator]
+    ANA[Analytics / BI]
+    SIEM[SIEM and audit store]
+    INF[InfluxDB sink]
+    S3SINK[S3 archive sink]
+  end
+
+  TS --> T1
+  CDR --> T2
+  HWR --> T2
+  ORC --> T3
+  ORC --> T2
+  AUTH --> T4
+  ARC --> T5
+
+  T1 --> QGS
+  T1 --> ANA
+  T1 --> S3SINK
+  T2 --> ORC2
+  T2 --> ANA
+  T3 --> ANA
+  T4 --> SIEM
+  T4 --> S3SINK
+  T5 --> INF
+    </pre>
+  </div>
+  <table>
+    <thead><tr><th>Topic</th><th>Producers</th><th>Consumers</th><th>Retention</th></tr></thead>
+    <tbody>
+      <tr><td><code>test.results</code></td><td>Custom test systems</td><td>QGS, Analytics, S3 archive</td><td>14 days hot, archived</td></tr>
+      <tr><td><code>deployment.events</code></td><td>CD runners, Orchestrator</td><td>Orchestrator, Analytics</td><td>30 days</td></tr>
+      <tr><td><code>release.lifecycle</code></td><td>Orchestrator</td><td>Analytics, BI, Audit</td><td>90 days</td></tr>
+      <tr><td><code>audit</code></td><td>All services</td><td>SIEM, long-term audit</td><td>7 years (archived)</td></tr>
+      <tr><td><code>metrics.runners</code></td><td>ARC exporter</td><td>InfluxDB sink</td><td>7 days</td></tr>
+    </tbody>
+  </table>
+  <p class="note">Failure-mode notes: producers buffer locally with exponential backoff if Kafka is unreachable. Consumers commit offsets only after successful processing. QGS uses idempotent processing so a replay never produces a duplicate check run. A wire-compatible alternative such as <a href="https://redpanda.com/" target="_blank" rel="noopener">Redpanda</a> is acceptable and lighter to operate.</p>
 </section>
 
 <section id="data">
@@ -540,6 +648,18 @@ stateDiagram-v2
     <li><a href="https://open-policy-agent.github.io/gatekeeper/website/docs/" target="_blank" rel="noopener">OPA Gatekeeper</a></li>
     <li><a href="https://www.openpolicyagent.org/docs/" target="_blank" rel="noopener">Open Policy Agent</a></li>
     <li><a href="https://github.com/sigstore/cosign" target="_blank" rel="noopener">cosign (image signing)</a></li>
+  </ul>
+
+  <h3>Messaging &amp; integration</h3>
+  <ul class="ref">
+    <li><a href="https://kafka.apache.org/" target="_blank" rel="noopener">Apache Kafka</a></li>
+    <li><a href="https://kafka.apache.org/documentation/" target="_blank" rel="noopener">Kafka documentation</a></li>
+    <li><a href="https://docs.confluent.io/platform/current/schema-registry/index.html" target="_blank" rel="noopener">Confluent Schema Registry</a></li>
+    <li><a href="https://www.apicur.io/registry/" target="_blank" rel="noopener">Apicurio Registry (on-prem)</a></li>
+    <li><a href="https://docs.confluent.io/platform/current/connect/index.html" target="_blank" rel="noopener">Kafka Connect</a></li>
+    <li><a href="https://redpanda.com/" target="_blank" rel="noopener">Redpanda (Kafka-compatible)</a></li>
+    <li><a href="https://avro.apache.org/docs/" target="_blank" rel="noopener">Apache Avro</a></li>
+    <li><a href="https://protobuf.dev/" target="_blank" rel="noopener">Protocol Buffers</a></li>
   </ul>
 
   <h3>Storage &amp; data</h3>
