@@ -97,7 +97,7 @@
     </div>
     <div class="card">
       <h4>워크플로우가 테스트 트리거</h4>
-      <p>CD/HW GitHub Actions 워크플로우가 인증된 HTTP를 통해 각 커스텀 테스트 시스템을 <strong>명시적으로 트리거</strong>합니다. 테스트 시스템은 Kafka를 통해 결과를 역으로 게시합니다—불투명한 결합 없음.</p>
+      <p>CD/HW GitHub Actions 워크플로우가 인증된 HTTP를 통해 각 커스텀 테스트 시스템을 <strong>명시적으로 트리거</strong>합니다. 테스트 시스템은 Kafka를 통해 결과를 다시 게시합니다—불투명한 결합 없음.</p>
     </div>
     <div class="card">
       <h4>Fail-safe CD 게이팅</h4>
@@ -233,7 +233,7 @@ flowchart TB
   <h2>컴포넌트 설계</h2>
 
   <article id="c-ghes" class="component">
-    <h3>GHES — 시스템 기록</h3>
+    <h3>GHES — 기록 시스템</h3>
     <p>
       <a href="https://docs.github.com/en/enterprise-server@latest/admin/overview/about-github-enterprise-server" target="_blank" rel="noopener">GitHub Enterprise Server</a>는
       모든 저장소, 워크플로우, 릴리스 이벤트를 호스팅합니다. 핵심적으로 활용하는 기능:
@@ -296,7 +296,7 @@ flowchart TB
       <li>QGS가 <code>success | failure</code>로 <code>qgs/release-criteria</code> 체크를 게시합니다.</li>
       <li><code>production-firmware</code> Environment가 해당 체크를 요구합니다 — 상태 없음 = 차단.</li>
     </ol>
-    <p class="note"><strong>왜 HTTP 웹훅 대신 Kafka에서 풀하나요?</strong> 하루 5,000건 이상의 빌드는 버스트성 결과 볼륨을 의미합니다. Kafka가 테스트 시스템과 QGS를 분리하고, 버스트를 흡수하며, QGS 레플리카를 독립적으로 확장하고, 테스트 시스템이 새로운 컨슈머를 알 필요 없이 분석/감사에 동일한 스트림의 복사본을 제공합니다.</p>
+    <p class="note"><strong>왜 HTTP 웹훅 대신 Kafka에서 소비하나요?</strong> 하루 5,000건 이상의 빌드는 버스트성 결과 볼륨을 의미합니다. Kafka가 테스트 시스템과 QGS를 분리하고, 버스트를 흡수하며, QGS 레플리카를 독립적으로 확장하고, 테스트 시스템이 새로운 컨슈머를 알 필요 없이 분석/감사에 동일한 스트림의 복사본을 제공합니다.</p>
   </article>
 
   <article id="c-hw" class="component">
@@ -588,7 +588,7 @@ stateDiagram-v2
 
 <section id="migration">
   <h2>마이그레이션 계획</h2>
-  <p>~6~9개월에 걸친 단계적 롤아웃. <strong>빅뱅 방식은 사용하지 마세요.</strong></p>
+  <p>약 6~9개월에 걸친 단계적 롤아웃. <strong>빅뱅 방식은 사용하지 마세요.</strong></p>
   <div class="phases">
     <div class="phase">
       <h4>Phase 0 — 기초</h4>
@@ -621,7 +621,7 @@ stateDiagram-v2
       <tr><td>불투명한 Bamboo Python 스크립트가 동작을 숨김</td><td>높음</td><td>높음</td><td>Phase 1 감사: 모든 스크립트를 재구현 전에 분해하고 문서화</td></tr>
       <tr><td>커스텀 테스트 시스템의 형식이 다양함</td><td>중간</td><td>중간</td><td>QGS가 안정적인 JSON 스키마 노출; 각 시스템이 얇은 어댑터 작성</td></tr>
       <tr><td>HW 벤치 가용성이 병목이 됨</td><td>중간</td><td>높음</td><td>예약 서비스가 큐 깊이 메트릭 내보냄 → 용량 결정</td></tr>
-      <tr><td>GHES 중단으로 빌드 중단</td><td>낮음</td><td>높음</td><td><a href="https://docs.github.com/en/enterprise-server@latest/admin/configuration/configuring-your-enterprise/configuring-high-availability-replication-for-a-cluster" target="_blank" rel="noopener">HA 복제</a> + DR 런북; 릴리스 오케스트레이터가 재시도 큐잉</td></tr>
+      <tr><td>GHES 중단으로 빌드 중단</td><td>낮음</td><td>높음</td><td><a href="https://docs.github.com/en/enterprise-server@latest/admin/configuration/configuring-your-enterprise/configuring-high-availability-replication-for-a-cluster" target="_blank" rel="noopener">HA 복제</a> + DR 런북; 릴리스 오케스트레이터가 재시도를 대기열에 추가</td></tr>
       <tr><td>개발자가 필수 워크플로우를 우회</td><td>낮음</td><td>중간</td><td>조직 수준 필수 워크플로우는 저장소 관리자도 우회 불가; 감사 로그 알림</td></tr>
       <tr><td>스토리지 비용 증가 (7년 보존)</td><td>높음</td><td>낮음</td><td>계층화: 핫 S3 → 1년 후 콜드 오브젝트 스토어; 대용량 캡처는 S3 대신 NFS</td></tr>
     </tbody>
