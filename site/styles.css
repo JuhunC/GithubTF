@@ -264,7 +264,8 @@ h4 { font-size: 15px; margin: 0 0 6px; }
 
 /* Sequence and state diagrams are shorter */
 #gate-sequence .diagram,
-#hw-state .diagram { min-height: 520px; }
+#hw-state .diagram,
+#jira-flow .diagram { min-height: 560px; }
 
 /* Simple flowcharts (runner pools, kafka) */
 #runner-pools .diagram,
