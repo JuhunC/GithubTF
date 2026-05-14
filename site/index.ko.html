@@ -101,15 +101,15 @@
     </div>
     <div class="card">
       <h4>Fail-safe CD 게이팅</h4>
-      <p>Quality Gate Service가 <a href="https://docs.github.com/en/rest/checks/runs" target="_blank" rel="noopener">체크 런</a>을 게시하고, Environment 보호 규칙이 이를 요구합니다. 상태 없음 = 릴리스 차단.</p>
+      <p>Quality Gate Service가 <a href="https://docs.github.com/en/rest/checks/runs" target="_blank" rel="noopener">Check Run</a>을 게시하고, Environment 보호 규칙이 이를 요구합니다. 상태 없음 = 릴리스 차단.</p>
     </div>
     <div class="card">
       <h4>영구 결과 저장</h4>
-      <p>펌웨어 바이너리는 <a href="https://min.io/docs/minio/linux/administration/object-management/object-retention.html" target="_blank" rel="noopener">오브젝트 잠금</a>과 함께 7년간 <a href="https://min.io/docs/minio/linux/index.html" target="_blank" rel="noopener">MinIO</a>/<a href="https://docs.ceph.com/" target="_blank" rel="noopener">Ceph</a>에 저장되며, 메타데이터는 <a href="https://www.postgresql.org/docs/" target="_blank" rel="noopener">PostgreSQL</a>, 메트릭은 <a href="https://docs.influxdata.com/" target="_blank" rel="noopener">InfluxDB</a> + <a href="https://grafana.com/docs/" target="_blank" rel="noopener">Grafana</a>에 저장됩니다.</p>
+      <p>펌웨어 바이너리는 <a href="https://min.io/docs/minio/linux/administration/object-management/object-retention.html" target="_blank" rel="noopener">Object Lock</a>과 함께 7년간 <a href="https://min.io/docs/minio/linux/index.html" target="_blank" rel="noopener">MinIO</a>/<a href="https://docs.ceph.com/" target="_blank" rel="noopener">Ceph</a>에 저장되며, 메타데이터는 <a href="https://www.postgresql.org/docs/" target="_blank" rel="noopener">PostgreSQL</a>, 메트릭은 <a href="https://docs.influxdata.com/" target="_blank" rel="noopener">InfluxDB</a> + <a href="https://grafana.com/docs/" target="_blank" rel="noopener">Grafana</a>에 저장됩니다.</p>
     </div>
     <div class="card">
       <h4>Kafka 백본</h4>
-      <p><a href="https://kafka.apache.org/" target="_blank" rel="noopener">Apache Kafka</a>가 프로듀서와 컨슈머를 분리합니다. 테스트 시스템, 러너, 오케스트레이터, 분석 모두가 재생 및 버스트 흡수 기능을 갖춘 버전화된 토픽을 통해 통신합니다.</p>
+      <p><a href="https://kafka.apache.org/" target="_blank" rel="noopener">Apache Kafka</a>가 프로듀서와 컨슈머를 분리합니다. 테스트 시스템, 러너, 오케스트레이터, 분석 모두가 재생 및 버스트 흡수 기능을 갖춘 버전 관리 토픽을 통해 통신합니다.</p>
     </div>
     <div class="card">
       <h4>전용 서버의 오케스트레이터</h4>
@@ -137,7 +137,7 @@
 
 <section id="diagram">
   <h2>상위 수준 아키텍처</h2>
-  <p>주요 시스템과 통신 방식. GHES가 신뢰의 원천이며, ARC가 쿠버네티스에서 러너를 확장하고, CD는 GitHub Environment 보호 규칙을 통해 Quality Gate Service에 의해 게이팅됩니다.</p>
+  <p>주요 시스템과 통신 방식. GHES가 단일 진실 공급원이며, ARC가 쿠버네티스에서 러너를 확장하고, CD는 GitHub Environment 보호 규칙을 통해 Quality Gate Service에 의해 게이팅됩니다.</p>
   <div class="diagram">
     <pre class="mermaid">
 flowchart TB
@@ -242,7 +242,7 @@ flowchart TB
       <li>공유 CI 패턴을 위한 <a href="https://docs.github.com/en/actions/using-workflows/reusing-workflows" target="_blank" rel="noopener">재사용 가능한 워크플로우</a> 및 <a href="https://docs.github.com/en/actions/creating-actions/creating-a-composite-action" target="_blank" rel="noopener">복합 액션</a>.</li>
       <li>기본 CD 차단 메커니즘인 필수 검토자와 <a href="https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment#required-reviewers" target="_blank" rel="noopener">보호 규칙</a>을 갖춘 <a href="https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment" target="_blank" rel="noopener">Environment</a>.</li>
       <li>조직 수준 <a href="https://docs.github.com/en/actions/using-workflows/required-workflows" target="_blank" rel="noopener">필수 워크플로우</a> — 모든 저장소가 의무적인 정책/보안 작업을 실행.</li>
-      <li>릴리스 오케스트레이터를 위한 저장소별 범위 설치 토큰을 갖춘 <a href="https://docs.github.com/en/apps/creating-github-apps/about-creating-github-apps/about-creating-github-apps" target="_blank" rel="noopener">GitHub Apps</a>.</li>
+      <li>릴리스 오케스트레이터를 위한 저장소별로 범위가 지정된 설치 토큰을 갖춘 <a href="https://docs.github.com/en/apps/creating-github-apps/about-creating-github-apps/about-creating-github-apps" target="_blank" rel="noopener">GitHub Apps</a>.</li>
       <li>키 없는 러너-서비스 인증(S3, Postgres, HW 예약)을 위한 <a href="https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect" target="_blank" rel="noopener">OIDC 토큰</a>.</li>
     </ul>
   </article>
@@ -259,7 +259,7 @@ flowchart TB
       <tbody>
         <tr><td>CI</td><td><code>ci</code>, <code>linux-x64</code></td><td><code>runners-ci-&lt;team&gt;</code></td><td>PR + 기능 브랜치 push</td><td>팀별 <a href="https://kubernetes.io/docs/concepts/policy/resource-quotas/" target="_blank" rel="noopener">ResourceQuota</a></td></tr>
         <tr><td>CD</td><td><code>cd</code>, <code>release</code></td><td><code>runners-cd</code></td><td><code>release</code> 및 <code>deployment</code> 이벤트만</td><td>예약 용량, 선점 불가</td></tr>
-        <tr><td>HW</td><td><code>hw-bench-&lt;id&gt;</code>, <code>firmware-&lt;product&gt;</code></td><td><code>runners-hw</code></td><td>벤치 레이블을 요청하는 워크플로우</td><td>K8s <a href="https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#nodeselector" target="_blank" rel="noopener">nodeSelector</a> + <a href="https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/" target="_blank" rel="noopener">테인트/톨러레이션</a></td></tr>
+        <tr><td>HW</td><td><code>hw-bench-&lt;id&gt;</code>, <code>firmware-&lt;product&gt;</code></td><td><code>runners-hw</code></td><td>벤치 레이블을 요청하는 워크플로우</td><td>K8s <a href="https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#nodeselector" target="_blank" rel="noopener">nodeSelector</a> + <a href="https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/" target="_blank" rel="noopener">taint/toleration</a></td></tr>
       </tbody>
     </table>
     <p>커스텀 러너 이미지는 매일 밤 빌드되고, <a href="https://github.com/sigstore/cosign" target="_blank" rel="noopener">cosign</a>으로 서명되며, 내부 레지스트리에서 가져오고, 승인된 툴체인만 포함합니다. 새 도구를 추가하려면 개발자가 runner-image 저장소에 PR을 제출해야 하며, 런타임에 설치할 수 없습니다.</p>
@@ -270,9 +270,9 @@ flowchart TB
     <p><strong>전용 서버</strong>에서 호스팅되는 <a href="https://docs.github.com/en/apps/creating-github-apps/about-creating-github-apps/about-creating-github-apps" target="_blank" rel="noopener">GitHub App</a> — Spring Boot 릴리스 앱을 실행하던 동일한 VM 또는 새로운 동급 VM. 명시적으로 K8s 러너 클러스터 <strong>내부가 아닙니다</strong>.</p>
     <p><strong>K8s 외부에 위치하는 이유:</strong></p>
     <ul>
-      <li><strong>블래스트 반경 격리.</strong> 클러스터 업그레이드, ARC 버그, 네트워킹 문제가 릴리스 제어 플레인도 중단시킬 수 없습니다.</li>
+      <li><strong>Blast Radius 격리.</strong> 클러스터 업그레이드, ARC 버그, 네트워킹 문제가 릴리스 제어 플레인도 중단시킬 수 없습니다.</li>
       <li><strong>안정적인 네트워크 ID.</strong> GHES 웹훅과 오퍼레이터 접근을 위한 고정 호스트명/IP — 파드 재시작으로 인한 혼란 없음.</li>
-      <li><strong>리프트 앤 시프트 경로.</strong> 레거시 호스트의 기존 OS 구성, 모니터링 에이전트, 백업 정책 재사용.</li>
+      <li><strong>Lift-and-Shift 경로.</strong> 레거시 호스트의 기존 OS 구성, 모니터링 에이전트, 백업 정책 재사용.</li>
     </ul>
     <p><a href="https://kafka.apache.org/" target="_blank" rel="noopener">Kafka</a> 토픽(<code>release.lifecycle</code>, <code>deployment.events</code>)에 프로듀스/컨슘하여 수평 확장이 가능하고 분석 컨슈머로부터 분리됩니다. 주요 책임:</p>
     <ol>
@@ -280,15 +280,15 @@ flowchart TB
       <li>PostgreSQL에 commit SHA, 버전, 대상 HW, 요청자를 포함한 <code>firmware_release</code> 행 생성.</li>
       <li>Kafka에 <code>release.lifecycle</code> 이벤트 게시.</li>
       <li><code>production-firmware</code> Environment에 GitHub <a href="https://docs.github.com/en/rest/deployments/deployments" target="_blank" rel="noopener">Deployment</a>를 열어 보호 규칙 트리거.</li>
-      <li>Kafka의 <code>deployment.events</code>(CD 러너가 내보냄)와 CI/QGS의 <a href="https://docs.github.com/en/rest/checks/runs" target="_blank" rel="noopener">체크 런</a> 소비.</li>
-      <li>성공 시 S3 아티팩트가 <a href="https://min.io/docs/minio/linux/administration/object-management/object-retention.html" target="_blank" rel="noopener">오브젝트 잠금</a>(<code>compliance-7y</code>)으로 태그되었는지 확인.</li>
+      <li>Kafka의 <code>deployment.events</code>(CD 러너가 내보냄)와 CI/QGS의 <a href="https://docs.github.com/en/rest/checks/runs" target="_blank" rel="noopener">Check Run</a> 소비.</li>
+      <li>성공 시 S3 아티팩트가 <a href="https://min.io/docs/minio/linux/administration/object-management/object-retention.html" target="_blank" rel="noopener">Object Lock</a>(<code>compliance-7y</code>)으로 태그되었는지 확인.</li>
     </ol>
     <p>Bamboo에서 불투명한 Python 스크립트로 인코딩되었던 오케스트레이션 로직이 이제 개발자가 읽을 수 있는 <strong>투명하고 버전 관리된 YAML 워크플로우</strong>로 저장됩니다.</p>
   </article>
 
   <article id="c-qgs" class="component">
     <h3>Quality Gate Service (CD 차단)</h3>
-    <p>테스트 결과를 GitHub <a href="https://docs.github.com/en/rest/checks/runs" target="_blank" rel="noopener">체크 런</a>으로 변환합니다. 차단은 GitHub 자체에 의해 강제됩니다 — QGS가 다운되거나 Kafka가 정체되면 체크가 녹색으로 변하지 않아 게이트가 닫힌 상태를 유지합니다(fail-safe).</p>
+    <p>테스트 결과를 GitHub <a href="https://docs.github.com/en/rest/checks/runs" target="_blank" rel="noopener">Check Run</a>으로 변환합니다. 차단은 GitHub 자체에 의해 강제됩니다 — QGS가 다운되거나 Kafka가 정체되면 체크가 녹색으로 변하지 않아 게이트가 닫힌 상태를 유지합니다(fail-safe).</p>
     <ol>
       <li>CD/HW <strong>GitHub Actions 워크플로우가</strong> 릴리스 ID, commit SHA, 대상 HW, 콜백 상관 ID와 함께 인증된 HTTP(예: <code>POST https://firmware-validation.internal/runs</code>)를 통해 각 관련 커스텀 테스트 시스템을 명시적으로 트리거합니다.</li>
       <li>테스트 시스템은 비동기적으로 실행되고, 완료 시 상관 ID를 담아 <strong>Kafka 토픽 <code>test.results</code>에 결과를 게시</strong>합니다.</li>
@@ -303,9 +303,9 @@ flowchart TB
     <h3>하드웨어 인더루프 러너</h3>
     <p>Bamboo의 "HW에 고정된 에이전트"가 커스텀 K8s 노드 레이블과 내부 <strong>HW 예약 서비스</strong>를 갖춘 ARC로 매핑됩니다:</p>
     <ul>
-      <li>각 벤치 연결 노드는 <code>firmware.corp/bench=bench-A-04</code> 같은 레이블과 테인트를 가지므로 HW 워크로드만 해당 노드에 배치됩니다.</li>
+      <li>각 벤치 연결 노드는 <code>firmware.corp/bench=bench-A-04</code> 같은 label과 taint를 가지므로 HW 워크로드만 해당 노드에 배치됩니다.</li>
       <li>워크플로우는 <code>runs-on: [self-hosted, hw-bench, firmware-productX]</code>로 선택합니다.</li>
-      <li>예약 서비스가 희소한 벤치에 대한 접근을 직렬화합니다 — 작업이 <code>hwres acquire</code> / <code>release</code>를 호출합니다. 원격 측정이 <a href="https://grafana.com/" target="_blank" rel="noopener">Grafana</a>에 피드됩니다.</li>
+      <li>예약 서비스가 희소한 벤치에 대한 접근을 순차적으로 제어합니다 — 작업이 <code>hwres acquire</code> / <code>release</code>를 호출합니다. 원격 측정이 <a href="https://grafana.com/" target="_blank" rel="noopener">Grafana</a>에 피드됩니다.</li>
       <li>참조: 오픈소스 <a href="https://labgrid.readthedocs.io/" target="_blank" rel="noopener">LabGrid</a>가 처음부터 작성하는 것보다 통합할 수 있는 검증된 옵션입니다.</li>
     </ul>
   </article>
@@ -354,7 +354,7 @@ flowchart LR
   GK -. policies .-> HWN
     </pre>
   </div>
-  <p class="note">각 팀의 CI 네임스페이스에는 하드 <a href="https://kubernetes.io/docs/concepts/policy/resource-quotas/" target="_blank" rel="noopener">ResourceQuota</a>가 있으며, CD 풀의 RunnerSet에는 릴리스를 항상 시작할 수 있는 최소 레플리카 하한이 있습니다. <a href="https://kubernetes.io/docs/concepts/services-networking/network-policies/" target="_blank" rel="noopener">NetworkPolicy</a>가 이그레스를 제한하고, <a href="https://open-policy-agent.github.io/gatekeeper/website/docs/" target="_blank" rel="noopener">OPA Gatekeeper</a>가 러너 프로파일을 벗어나는 파드를 거부합니다.</p>
+  <p class="note">각 팀의 CI 네임스페이스에는 하드 <a href="https://kubernetes.io/docs/concepts/policy/resource-quotas/" target="_blank" rel="noopener">ResourceQuota</a>가 있으며, CD 풀의 RunnerSet에는 릴리스를 항상 시작할 수 있는 최소 레플리카 하한이 있습니다. <a href="https://kubernetes.io/docs/concepts/services-networking/network-policies/" target="_blank" rel="noopener">NetworkPolicy</a>가 Egress를 제한하고, <a href="https://open-policy-agent.github.io/gatekeeper/website/docs/" target="_blank" rel="noopener">OPA Gatekeeper</a>가 러너 프로파일을 벗어나는 파드를 거부합니다.</p>
 </section>
 
 <section id="gate-sequence">
@@ -407,7 +407,7 @@ sequenceDiagram
 
 <section id="kafka-topics">
   <h2>다이어그램: Kafka 토폴로지</h2>
-  <p><a href="https://kafka.apache.org/" target="_blank" rel="noopener">Apache Kafka</a>가 고처리량 백본입니다. 프로듀서(러너, 테스트 시스템, 오케스트레이터)와 컨슈머(QGS, 오케스트레이터, 분석, 감사)가 버전화된 토픽을 통해 분리됩니다. 스키마는 <a href="https://docs.confluent.io/platform/current/schema-registry/index.html" target="_blank" rel="noopener">Schema Registry</a>(또는 <a href="https://www.apicur.io/registry/" target="_blank" rel="noopener">Apicurio</a>)에 등록되어 컨슈머가 필드 형태에 의존할 수 있습니다.</p>
+  <p><a href="https://kafka.apache.org/" target="_blank" rel="noopener">Apache Kafka</a>가 고처리량 백본입니다. 프로듀서(러너, 테스트 시스템, 오케스트레이터)와 컨슈머(QGS, 오케스트레이터, 분석, 감사)가 버전 관리 토픽을 통해 분리됩니다. 스키마는 <a href="https://docs.confluent.io/platform/current/schema-registry/index.html" target="_blank" rel="noopener">Schema Registry</a>(또는 <a href="https://www.apicur.io/registry/" target="_blank" rel="noopener">Apicurio</a>)에 등록되어 컨슈머가 메시지 필드 구조를 보장받을 수 있습니다.</p>
   <div class="diagram">
     <pre class="mermaid">
 flowchart LR
@@ -466,7 +466,7 @@ flowchart LR
       <tr><td><code>metrics.runners</code></td><td>ARC 익스포터</td><td>InfluxDB 싱크</td><td>7일</td></tr>
     </tbody>
   </table>
-  <p class="note">장애 모드 참고사항: 프로듀서는 Kafka에 연결할 수 없는 경우 지수 백오프로 로컬 버퍼링합니다. 컨슈머는 성공적인 처리 후에만 오프셋을 커밋합니다. QGS는 멱등적 처리를 사용하므로 재생이 중복 체크 런을 생성하지 않습니다. <a href="https://redpanda.com/" target="_blank" rel="noopener">Redpanda</a>와 같은 와이어 호환 대안도 허용 가능하며 운영이 더 가볍습니다.</p>
+  <p class="note">장애 모드 참고사항: 프로듀서는 Kafka에 연결할 수 없는 경우 지수 백오프로 로컬 버퍼링합니다. 컨슈머는 성공적인 처리 후에만 오프셋을 커밋합니다. QGS는 멱등적 처리를 사용하므로 재생이 중복 Check Run을 생성하지 않습니다. <a href="https://redpanda.com/" target="_blank" rel="noopener">Redpanda</a>와 같은 와이어 호환 대안도 허용 가능하며 운영이 더 가볍습니다.</p>
 </section>
 
 <section id="data">
@@ -525,11 +525,11 @@ flowchart LR
   <table>
     <thead><tr><th>데이터</th><th>스토어</th><th>보존</th></tr></thead>
     <tbody>
-      <tr><td>펌웨어 바이너리, 서명된 매니페스트</td><td><a href="https://min.io/docs/minio/linux/index.html" target="_blank" rel="noopener">MinIO</a>/<a href="https://docs.ceph.com/en/latest/radosgw/" target="_blank" rel="noopener">Ceph RGW</a></td><td>7년, <a href="https://min.io/docs/minio/linux/administration/object-management/object-retention.html" target="_blank" rel="noopener">오브젝트 잠금</a></td></tr>
+      <tr><td>펌웨어 바이너리, 서명된 매니페스트</td><td><a href="https://min.io/docs/minio/linux/index.html" target="_blank" rel="noopener">MinIO</a>/<a href="https://docs.ceph.com/en/latest/radosgw/" target="_blank" rel="noopener">Ceph RGW</a></td><td>7년, <a href="https://min.io/docs/minio/linux/administration/object-management/object-retention.html" target="_blank" rel="noopener">Object Lock</a></td></tr>
       <tr><td>빌드 로그, 원시 테스트 출력</td><td>S3 <code>build-artifacts</code></td><td>1년 → 콜드 티어</td></tr>
       <tr><td>대용량 HW 캡처, 오실로스코프 트레이스</td><td><a href="https://wiki.linux-nfs.org/" target="_blank" rel="noopener">NFS</a> <code>/labdata/&lt;product&gt;/&lt;release&gt;</code></td><td>2년 → 아카이브</td></tr>
       <tr><td>릴리스 메타데이터, 게이트, 승인</td><td><a href="https://www.postgresql.org/docs/" target="_blank" rel="noopener">PostgreSQL</a></td><td>무기한</td></tr>
-      <tr><td>러너 활용률, 빌드 기간</td><td><a href="https://docs.influxdata.com/" target="_blank" rel="noopener">InfluxDB</a> + <a href="https://prometheus.io/docs/" target="_blank" rel="noopener">Prometheus</a></td><td>핫 90일, 무기한 다운샘플</td></tr>
+      <tr><td>러너 활용률, 빌드 기간</td><td><a href="https://docs.influxdata.com/" target="_blank" rel="noopener">InfluxDB</a> + <a href="https://prometheus.io/docs/" target="_blank" rel="noopener">Prometheus</a></td><td>핫 90일, 영구 다운샘플링</td></tr>
       <tr><td>대시보드</td><td><a href="https://grafana.com/docs/" target="_blank" rel="noopener">Grafana</a></td><td>해당 없음</td></tr>
     </tbody>
   </table>
@@ -563,10 +563,10 @@ stateDiagram-v2
   <ol>
     <li><strong>임시 파드 러너</strong> — 작업 후 영구 상태가 없습니다.</li>
     <li><strong>강화된 러너 이미지</strong> — 승인된 툴체인만; 런타임에 <code>apt install</code> 불가; <a href="https://github.com/sigstore/cosign" target="_blank" rel="noopener">cosign</a>으로 서명.</li>
-    <li><strong>러너 네임스페이스의 <a href="https://kubernetes.io/docs/concepts/services-networking/network-policies/" target="_blank" rel="noopener">NetworkPolicy</a></strong> — 이그레스 허용 목록은 GHES, 내부 레지스트리, MinIO, 승인된 서비스만. 퍼블릭 인터넷 차단.</li>
-    <li><strong><a href="https://open-policy-agent.github.io/gatekeeper/website/docs/" target="_blank" rel="noopener">OPA Gatekeeper</a> 어드미션 컨트롤</strong> — 러너 프로파일을 벗어나는 파드 거부.</li>
+    <li><strong>러너 네임스페이스의 <a href="https://kubernetes.io/docs/concepts/services-networking/network-policies/" target="_blank" rel="noopener">NetworkPolicy</a></strong> — Egress 허용 목록은 GHES, 내부 레지스트리, MinIO, 승인된 서비스만. 퍼블릭 인터넷 차단.</li>
+    <li><strong><a href="https://open-policy-agent.github.io/gatekeeper/website/docs/" target="_blank" rel="noopener">OPA Gatekeeper</a> Admission Control</strong> — 러너 프로파일을 벗어나는 파드 거부.</li>
     <li><strong><a href="https://docs.github.com/en/actions/using-workflows/required-workflows" target="_blank" rel="noopener">필수 워크플로우</a></strong> — 모든 실행이 안티패턴(긴 <code>sleep</code>, 의심스러운 바이너리)에서 실행을 실패시키는 정책 작업으로 시작합니다.</li>
-    <li><strong>Grafana의 차지백 대시보드</strong> — 팀별 가시성이 자기 규제를 유도합니다.</li>
+    <li><strong>Grafana의 Chargeback 대시보드</strong> — 팀별 가시성이 자기 규제를 유도합니다.</li>
   </ol>
 </section>
 
@@ -576,8 +576,8 @@ stateDiagram-v2
     <thead><tr><th>우려사항</th><th>해결책</th></tr></thead>
     <tbody>
       <tr><td>과도한 CI 사용자가 CD를 고갈</td><td>별도 K8s 노드 풀의 분리된 ARC RunnerScaleSet + CD 최소 하한 + 팀별 ResourceQuota</td></tr>
-      <tr><td>러너를 CI/CD 외 컴퓨팅에 사용</td><td>임시 파드 + 강화된 이미지 + 이그레스 NetworkPolicy + Gatekeeper + 필수 워크플로우</td></tr>
-      <tr><td>CD 결과 미보관</td><td>MinIO/Ceph 오브젝트 잠금 7년 + 캡처용 NFS + 메타데이터용 PostgreSQL; 필수 복합 액션이 업로드 강제</td></tr>
+      <tr><td>러너를 CI/CD 외 컴퓨팅에 사용</td><td>임시 파드 + 강화된 이미지 + Egress NetworkPolicy + Gatekeeper + 필수 워크플로우</td></tr>
+      <tr><td>CD 결과 미보관</td><td>MinIO/Ceph Object Lock 7년 + 캡처용 NFS + 메타데이터용 PostgreSQL; 필수 복합 액션이 업로드 강제</td></tr>
       <tr><td>기준 미충족 시 CD 차단</td><td>Environment 보호가 <code>qgs/release-criteria</code> 체크 요구; fail-safe</td></tr>
       <tr><td>HW 고정 실행</td><td>레이블+테인트 K8s 노드의 ARC 러너 + HW 예약 서비스</td></tr>
       <tr><td>개발자 유연성</td><td>누구나 워크플로우 작성; 제약은 조직 필수 워크플로우 + 허용된 러너 레이블로 적용</td></tr>
@@ -655,7 +655,7 @@ stateDiagram-v2
     <li><a href="https://kubernetes.io/docs/concepts/policy/resource-quotas/" target="_blank" rel="noopener">쿠버네티스 ResourceQuota</a></li>
     <li><a href="https://kubernetes.io/docs/concepts/policy/limit-range/" target="_blank" rel="noopener">쿠버네티스 LimitRange</a></li>
     <li><a href="https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/" target="_blank" rel="noopener">nodeSelector / affinity</a></li>
-    <li><a href="https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/" target="_blank" rel="noopener">테인트 및 톨러레이션</a></li>
+    <li><a href="https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/" target="_blank" rel="noopener">Taint 및 Toleration</a></li>
     <li><a href="https://kubernetes.io/docs/concepts/services-networking/network-policies/" target="_blank" rel="noopener">NetworkPolicy</a></li>
     <li><a href="https://open-policy-agent.github.io/gatekeeper/website/docs/" target="_blank" rel="noopener">OPA Gatekeeper</a></li>
     <li><a href="https://www.openpolicyagent.org/docs/" target="_blank" rel="noopener">Open Policy Agent</a></li>
@@ -677,7 +677,7 @@ stateDiagram-v2
   <h3>스토리지 및 데이터</h3>
   <ul class="ref">
     <li><a href="https://min.io/docs/minio/linux/index.html" target="_blank" rel="noopener">MinIO</a></li>
-    <li><a href="https://min.io/docs/minio/linux/administration/object-management/object-retention.html" target="_blank" rel="noopener">MinIO 오브젝트 잠금 / 보존</a></li>
+    <li><a href="https://min.io/docs/minio/linux/administration/object-management/object-retention.html" target="_blank" rel="noopener">MinIO Object Lock / 보존</a></li>
     <li><a href="https://docs.ceph.com/" target="_blank" rel="noopener">Ceph</a></li>
     <li><a href="https://docs.ceph.com/en/latest/radosgw/" target="_blank" rel="noopener">Ceph RADOS Gateway (S3)</a></li>
     <li><a href="https://www.postgresql.org/docs/" target="_blank" rel="noopener">PostgreSQL</a></li>
