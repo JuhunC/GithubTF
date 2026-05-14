@@ -109,7 +109,7 @@
     </div>
     <div class="card">
       <h4>Kafka 백본</h4>
-      <p><a href="https://kafka.apache.org/" target="_blank" rel="noopener">Apache Kafka</a>가 프로듀서와 컨슈머를 분리합니다. 테스트 시스템, 러너, 오케스트레이터, 분석 모두가 재생 및 버스트 흡수 기능을 갖춘 버전화된 토픽을 통해 통신합니다.</p>
+      <p><a href="https://kafka.apache.org/" target="_blank" rel="noopener">Apache Kafka</a>가 프로듀서와 컨슈머를 분리합니다. 테스트 시스템, 러너, 오케스트레이터, 분석 모두가 재생 및 버스트 흡수 기능을 갖춘 버전 관리 토픽을 통해 통신합니다.</p>
     </div>
     <div class="card">
       <h4>전용 서버의 오케스트레이터</h4>
@@ -137,7 +137,7 @@
 
 <section id="diagram">
   <h2>상위 수준 아키텍처</h2>
-  <p>주요 시스템과 통신 방식. GHES가 신뢰의 원천이며, ARC가 쿠버네티스에서 러너를 확장하고, CD는 GitHub Environment 보호 규칙을 통해 Quality Gate Service에 의해 게이팅됩니다.</p>
+  <p>주요 시스템과 통신 방식. GHES가 단일 진실 공급원이며, ARC가 쿠버네티스에서 러너를 확장하고, CD는 GitHub Environment 보호 규칙을 통해 Quality Gate Service에 의해 게이팅됩니다.</p>
   <div class="diagram">
     <pre class="mermaid">
 flowchart TB
@@ -242,7 +242,7 @@ flowchart TB
       <li>공유 CI 패턴을 위한 <a href="https://docs.github.com/en/actions/using-workflows/reusing-workflows" target="_blank" rel="noopener">재사용 가능한 워크플로우</a> 및 <a href="https://docs.github.com/en/actions/creating-actions/creating-a-composite-action" target="_blank" rel="noopener">복합 액션</a>.</li>
       <li>기본 CD 차단 메커니즘인 필수 검토자와 <a href="https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment#required-reviewers" target="_blank" rel="noopener">보호 규칙</a>을 갖춘 <a href="https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment" target="_blank" rel="noopener">Environment</a>.</li>
       <li>조직 수준 <a href="https://docs.github.com/en/actions/using-workflows/required-workflows" target="_blank" rel="noopener">필수 워크플로우</a> — 모든 저장소가 의무적인 정책/보안 작업을 실행.</li>
-      <li>릴리스 오케스트레이터를 위한 저장소별 범위 설치 토큰을 갖춘 <a href="https://docs.github.com/en/apps/creating-github-apps/about-creating-github-apps/about-creating-github-apps" target="_blank" rel="noopener">GitHub Apps</a>.</li>
+      <li>릴리스 오케스트레이터를 위한 저장소별로 범위가 지정된 설치 토큰을 갖춘 <a href="https://docs.github.com/en/apps/creating-github-apps/about-creating-github-apps/about-creating-github-apps" target="_blank" rel="noopener">GitHub Apps</a>.</li>
       <li>키 없는 러너-서비스 인증(S3, Postgres, HW 예약)을 위한 <a href="https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect" target="_blank" rel="noopener">OIDC 토큰</a>.</li>
     </ul>
   </article>
@@ -305,7 +305,7 @@ flowchart TB
     <ul>
       <li>각 벤치 연결 노드는 <code>firmware.corp/bench=bench-A-04</code> 같은 레이블과 테인트를 가지므로 HW 워크로드만 해당 노드에 배치됩니다.</li>
       <li>워크플로우는 <code>runs-on: [self-hosted, hw-bench, firmware-productX]</code>로 선택합니다.</li>
-      <li>예약 서비스가 희소한 벤치에 대한 접근을 직렬화합니다 — 작업이 <code>hwres acquire</code> / <code>release</code>를 호출합니다. 원격 측정이 <a href="https://grafana.com/" target="_blank" rel="noopener">Grafana</a>에 피드됩니다.</li>
+      <li>예약 서비스가 희소한 벤치에 대한 접근을 순차적으로 제어합니다 — 작업이 <code>hwres acquire</code> / <code>release</code>를 호출합니다. 원격 측정이 <a href="https://grafana.com/" target="_blank" rel="noopener">Grafana</a>에 피드됩니다.</li>
       <li>참조: 오픈소스 <a href="https://labgrid.readthedocs.io/" target="_blank" rel="noopener">LabGrid</a>가 처음부터 작성하는 것보다 통합할 수 있는 검증된 옵션입니다.</li>
     </ul>
   </article>
@@ -407,7 +407,7 @@ sequenceDiagram
 
 <section id="kafka-topics">
   <h2>다이어그램: Kafka 토폴로지</h2>
-  <p><a href="https://kafka.apache.org/" target="_blank" rel="noopener">Apache Kafka</a>가 고처리량 백본입니다. 프로듀서(러너, 테스트 시스템, 오케스트레이터)와 컨슈머(QGS, 오케스트레이터, 분석, 감사)가 버전화된 토픽을 통해 분리됩니다. 스키마는 <a href="https://docs.confluent.io/platform/current/schema-registry/index.html" target="_blank" rel="noopener">Schema Registry</a>(또는 <a href="https://www.apicur.io/registry/" target="_blank" rel="noopener">Apicurio</a>)에 등록되어 컨슈머가 필드 형태에 의존할 수 있습니다.</p>
+  <p><a href="https://kafka.apache.org/" target="_blank" rel="noopener">Apache Kafka</a>가 고처리량 백본입니다. 프로듀서(러너, 테스트 시스템, 오케스트레이터)와 컨슈머(QGS, 오케스트레이터, 분석, 감사)가 버전 관리 토픽을 통해 분리됩니다. 스키마는 <a href="https://docs.confluent.io/platform/current/schema-registry/index.html" target="_blank" rel="noopener">Schema Registry</a>(또는 <a href="https://www.apicur.io/registry/" target="_blank" rel="noopener">Apicurio</a>)에 등록되어 컨슈머가 메시지 필드 구조를 보장받을 수 있습니다.</p>
   <div class="diagram">
     <pre class="mermaid">
 flowchart LR
@@ -529,7 +529,7 @@ flowchart LR
       <tr><td>빌드 로그, 원시 테스트 출력</td><td>S3 <code>build-artifacts</code></td><td>1년 → 콜드 티어</td></tr>
       <tr><td>대용량 HW 캡처, 오실로스코프 트레이스</td><td><a href="https://wiki.linux-nfs.org/" target="_blank" rel="noopener">NFS</a> <code>/labdata/&lt;product&gt;/&lt;release&gt;</code></td><td>2년 → 아카이브</td></tr>
       <tr><td>릴리스 메타데이터, 게이트, 승인</td><td><a href="https://www.postgresql.org/docs/" target="_blank" rel="noopener">PostgreSQL</a></td><td>무기한</td></tr>
-      <tr><td>러너 활용률, 빌드 기간</td><td><a href="https://docs.influxdata.com/" target="_blank" rel="noopener">InfluxDB</a> + <a href="https://prometheus.io/docs/" target="_blank" rel="noopener">Prometheus</a></td><td>핫 90일, 무기한 다운샘플</td></tr>
+      <tr><td>러너 활용률, 빌드 기간</td><td><a href="https://docs.influxdata.com/" target="_blank" rel="noopener">InfluxDB</a> + <a href="https://prometheus.io/docs/" target="_blank" rel="noopener">Prometheus</a></td><td>핫 90일, 영구 다운샘플링</td></tr>
       <tr><td>대시보드</td><td><a href="https://grafana.com/docs/" target="_blank" rel="noopener">Grafana</a></td><td>해당 없음</td></tr>
     </tbody>
   </table>
