@@ -26,6 +26,7 @@
       <a href="#overview">Overview</a>
       <a href="#diagram">Architecture</a>
       <a href="#components">Components</a>
+      <a href="#jira-flow">Jira flow</a>
       <a href="#governance">Governance</a>
       <a href="#data">Data</a>
       <a href="#migration">Migration</a>
@@ -52,11 +53,13 @@
         <li><a href="#c-arc">ARC runners</a></li>
         <li><a href="#c-orch">Release orchestrator</a></li>
         <li><a href="#c-qgs">Quality gate service</a></li>
+        <li><a href="#c-jira">Jira Bridge Service</a></li>
         <li><a href="#c-hw">HW-in-the-loop</a></li>
       </ol>
     </li>
     <li><a href="#runner-pools">Runner pool isolation</a></li>
     <li><a href="#gate-sequence">CD gate sequence</a></li>
+    <li><a href="#jira-flow">Jira integration flow</a></li>
     <li><a href="#kafka-topics">Kafka topology</a></li>
     <li><a href="#data">Data persistence</a></li>
     <li><a href="#hw-state">HW reservation states</a></li>
@@ -78,7 +81,10 @@
     <a href="https://docs.github.com/en/actions" target="_blank" rel="noopener">GitHub Actions</a>, the
     <a href="https://github.com/actions/actions-runner-controller" target="_blank" rel="noopener">Actions Runner Controller (ARC)</a> on Kubernetes,
     an <a href="https://kafka.apache.org/" target="_blank" rel="noopener">Apache Kafka</a> message backbone,
-    and a Release Orchestrator GitHub App hosted on a dedicated server — designed for 300+ developers, 5,000+ builds/day, with hardware-in-the-loop firmware testing.
+    a Release Orchestrator GitHub App on a dedicated server, and a
+    <strong><a href="https://developer.atlassian.com/cloud/jira/platform/rest/v3/intro/" target="_blank" rel="noopener">Jira</a> Bridge Service</strong>
+    that mirrors releases, defects, and cross-department work into Atlassian Jira.
+    Designed for 300+ developers, 5,000+ builds/day, hardware-in-the-loop firmware testing, and a workflow where every change traces back to a Jira ticket.
   </p>
 
   <div class="pill-row">
@@ -86,6 +92,7 @@
     <span class="pill">300+ developers</span>
     <span class="pill">5,000+ builds/day</span>
     <span class="pill">HW-in-the-loop</span>
+    <span class="pill">Jira-integrated</span>
     <span class="pill">7-year release retention</span>
   </div>
 
@@ -100,15 +107,23 @@
     </div>
     <div class="card">
       <h4>Fail-safe CD gating</h4>
-      <p>The Quality Gate Service publishes a <a href="https://docs.github.com/en/rest/checks/runs" target="_blank" rel="noopener">check run</a>; the Environment protection rule requires it. No status = release blocked.</p>
+      <p>The Quality Gate Service publishes a <a href="https://docs.github.com/en/rest/checks/runs" target="_blank" rel="noopener">Check Run</a>; the Environment protection rule requires it. No status = release blocked.</p>
+    </div>
+    <div class="card">
+      <h4>Jira ↔ GitHub bridge</h4>
+      <p>Every release is published <strong>twice</strong>: as a GitHub Release and as a Jira <a href="https://support.atlassian.com/jira-software-cloud/docs/manage-versions/" target="_blank" rel="noopener"><code>fixVersion</code></a>. The Bridge Service auto-creates Jira defects from QGS failures and HW faults — deduplicated by commit + test fingerprint.</p>
+    </div>
+    <div class="card">
+      <h4>Required Jira key</h4>
+      <p>An org-level <a href="https://docs.github.com/en/actions/using-workflows/required-workflows" target="_blank" rel="noopener">Required Workflow</a> rejects PRs whose title or commits don't reference a valid Jira issue (<code>FW-1234</code>). Branch protection enforces it; <a href="https://confluence.atlassian.com/fisheye/using-smart-commits-960155400.html" target="_blank" rel="noopener">Smart Commits</a> drive ticket transitions automatically.</p>
     </div>
     <div class="card">
       <h4>Permanent results</h4>
-      <p>Firmware binaries land in <a href="https://min.io/docs/minio/linux/index.html" target="_blank" rel="noopener">MinIO</a>/<a href="https://docs.ceph.com/" target="_blank" rel="noopener">Ceph</a> with <a href="https://min.io/docs/minio/linux/administration/object-management/object-retention.html" target="_blank" rel="noopener">object lock</a> for 7 years; metadata in <a href="https://www.postgresql.org/docs/" target="_blank" rel="noopener">PostgreSQL</a>; metrics in <a href="https://docs.influxdata.com/" target="_blank" rel="noopener">InfluxDB</a> + <a href="https://grafana.com/docs/" target="_blank" rel="noopener">Grafana</a>.</p>
+      <p>Firmware binaries land in <a href="https://min.io/docs/minio/linux/index.html" target="_blank" rel="noopener">MinIO</a>/<a href="https://docs.ceph.com/" target="_blank" rel="noopener">Ceph</a> with <a href="https://min.io/docs/minio/linux/administration/object-management/object-retention.html" target="_blank" rel="noopener">Object Lock</a> for 7 years; metadata + Jira links in <a href="https://www.postgresql.org/docs/" target="_blank" rel="noopener">PostgreSQL</a>; metrics in <a href="https://docs.influxdata.com/" target="_blank" rel="noopener">InfluxDB</a> + <a href="https://grafana.com/docs/" target="_blank" rel="noopener">Grafana</a>.</p>
     </div>
     <div class="card">
       <h4>Kafka backbone</h4>
-      <p><a href="https://kafka.apache.org/" target="_blank" rel="noopener">Apache Kafka</a> decouples producers from consumers: test systems, runners, Orchestrator, and analytics all communicate through versioned topics with replay and burst absorption.</p>
+      <p><a href="https://kafka.apache.org/" target="_blank" rel="noopener">Apache Kafka</a> decouples producers from consumers: test systems, runners, Orchestrator, Jira Bridge, and analytics all communicate through versioned topics with replay and burst absorption.</p>
     </div>
     <div class="card">
       <h4>Orchestrator on its own server</h4>
@@ -130,24 +145,37 @@
       <tr><td>R6</td><td>HW-in-the-loop benches integrate with pipelines</td><td>Replaces Bamboo HW pinning</td></tr>
       <tr><td>R7</td><td>All components run on private corporate network</td><td>Project context</td></tr>
       <tr><td>R8</td><td>Spring Boot release app fully replaced</td><td>Decision</td></tr>
+      <tr><td>R9</td><td>Every commit / PR traces back to a Jira issue (<code>FW-1234</code>)</td><td>Cross-department traceability</td></tr>
+      <tr><td>R10</td><td>Every firmware release is published to Jira (<code>fixVersion</code> + release notes) in addition to GitHub Releases</td><td>Jira is the inter-department communication channel</td></tr>
+      <tr><td>R11</td><td>Test/HW failures auto-create Jira defects (deduplicated by commit + test fingerprint)</td><td>Defect tracking parity with current Bamboo workflow</td></tr>
     </tbody>
   </table>
 </section>
 
 <section id="diagram">
   <h2>High-level architecture</h2>
-  <p>The major systems and how they communicate. GHES is the source of truth; ARC scales runners on Kubernetes; CD is gated by the Quality Gate Service through GitHub Environment protection rules.</p>
+  <p>The major systems and how they communicate. GHES is the source of truth for code, builds, and binary releases; <strong>Jira is the system of record for cross-department work</strong> — issues, tasks, defects, and customer-facing release records. The <strong>Jira Bridge Service</strong> keeps the two in sync via Kafka and Jira REST API + webhooks. ARC scales runners on Kubernetes; CD is gated by the Quality Gate Service through GitHub Environment protection rules.</p>
   <div class="diagram">
     <pre class="mermaid">
 flowchart TB
   subgraph DEV[Developers]
-    D1[Push / PR]
+    D1[Push / PR with Jira key]
+  end
+
+  subgraph DEPT[Other Departments - PM, QA, HW, Support]
+    PM[Product Mgrs and QA]
   end
 
   subgraph GHES[GitHub Enterprise Server]
     REPO[Repos and Workflows]
     ENV[Environments and Protection Rules]
-    REQW[Required Workflows org policy]
+    REQW[Required Workflows - jira-key, policy]
+  end
+
+  subgraph JIRA[Atlassian Jira Data Center]
+    JISS[Issues, Tasks, Defects]
+    JVER[Versions and Releases]
+    JWF[Project Workflows and Automation]
   end
 
   subgraph ORC_SRV[Release Orchestrator Server - dedicated VM]
@@ -158,6 +186,8 @@ flowchart TB
     K_TR[topic: test.results]
     K_DE[topic: deployment.events]
     K_RL[topic: release.lifecycle]
+    K_JE[topic: jira.events]
+    K_JC[topic: jira.commands]
     K_AU[topic: audit]
   end
 
@@ -169,6 +199,7 @@ flowchart TB
       HWP[HW Pool]
     end
     QGS[Quality Gate Service]
+    JBR[Jira Bridge Service]
     HWS[HW Reservation Service]
     OPA[OPA Gatekeeper]
   end
@@ -188,14 +219,16 @@ flowchart TB
   subgraph DATA[Data and Persistence]
     S3[S3 MinIO/Ceph]
     NFS[NFS captures]
-    PG[(PostgreSQL)]
+    PG[(PostgreSQL - releases + jira_link)]
     INFLUX[(InfluxDB)]
     GRAF[Grafana]
   end
 
   D1 --> REPO
+  PM <--> JISS
+  PM <--> JVER
   REPO -->|workflow_run| ARC
-  REQW -. enforces .-> REPO
+  REQW -. enforces jira-key .-> REPO
   ARC --> CIP
   ARC --> CDP
   ARC --> HWP
@@ -219,6 +252,15 @@ flowchart TB
   APP --> K_DE
   CDP --> K_DE
   K_DE --> APP
+  QGS -->|defect on fail| K_JC
+  HWS -->|bench fault| K_JC
+  APP -->|publish release| K_JC
+  K_JC --> JBR
+  JBR <-->|REST API| JIRA
+  JIRA -->|webhooks| JBR
+  JBR --> K_JE
+  K_JE --> APP
+  JBR --> PG
   ARC -->|metrics| INFLUX
   ARC --> K_AU
   OPA -. admission .-> POOLS
@@ -295,6 +337,56 @@ flowchart TB
       <li>The <code>production-firmware</code> Environment requires that check — no status = blocked.</li>
     </ol>
     <p class="note"><strong>Why pull from Kafka instead of HTTP webhooks?</strong> 5,000+ builds/day means bursty result volume. Kafka decouples test systems from QGS, absorbs bursts, scales QGS replicas independently, and gives analytics/audit a copy of the same stream — without test systems needing to know about new consumers.</p>
+  </article>
+
+  <article id="c-jira" class="component">
+    <h3>Jira Bridge Service — cross-department system of record</h3>
+    <p>
+      A stateless service in K8s namespace <code>services-integration</code> that keeps
+      <a href="https://www.atlassian.com/software/jira" target="_blank" rel="noopener">Atlassian Jira Data Center</a> in sync with GHES, QGS, and the Release Orchestrator.
+      GHES owns code, builds, and binary releases; <strong>Jira owns the cross-department conversation</strong> — issues, tasks, defects, customer-visible release records.
+      The Bridge is the seam between them, and the only component allowed to talk to the Jira REST API.
+    </p>
+
+    <h4>Why a bridge instead of direct calls?</h4>
+    <ul>
+      <li><strong>One client, one rate-limit budget.</strong> Jira's REST API has per-user concurrency caps. Every other service speaks Kafka; only the Bridge speaks Jira — so we never accidentally DoS our own Jira from a runaway runner.</li>
+      <li><strong>Buffering on Jira outage.</strong> If Jira is down for maintenance, <code>jira.commands</code> piles up in Kafka. When Jira comes back, the Bridge drains the topic in order. No release event is ever lost; nothing in the pipeline is blocked waiting on Jira.</li>
+      <li><strong>Idempotent by design.</strong> Each command carries a natural key (commit SHA, release tag, test fingerprint). The Bridge keeps a <code>jira_link</code> table in Postgres so a replay never creates duplicate tickets.</li>
+      <li><strong>Single audit trail.</strong> Every Jira mutation is also an entry on <code>audit</code>; the SIEM sees what the Bridge did to Jira even if a Jira admin later edits the ticket.</li>
+    </ul>
+
+    <h4>Outbound flows (Kafka → Jira)</h4>
+    <table>
+      <thead><tr><th>Trigger topic</th><th>Action in Jira</th></tr></thead>
+      <tbody>
+        <tr><td><code>release.lifecycle</code> <code>(published)</code></td><td>Mark <a href="https://support.atlassian.com/jira-software-cloud/docs/manage-versions/" target="_blank" rel="noopener"><code>fixVersion</code></a> as Released; attach generated release notes; comment "Released in <code>1.2.3</code> → <code>fw-1.2.3.bin</code>" on every linked ticket; create a <code>RELEASE</code>-project record for cross-department visibility.</td></tr>
+        <tr><td><code>deployment.events</code></td><td>Comment on linked tickets with deployment status / target HW / artifact URL.</td></tr>
+        <tr><td><code>jira.commands</code> <code>(create_defect)</code></td><td>Create a Bug ticket — but first look up the <code>jira_link</code> by fingerprint <code>(test_name, commit_sha, bench_id)</code>. If an open defect exists, comment with the new failure instead of opening a duplicate.</td></tr>
+        <tr><td><code>jira.commands</code> <code>(transition)</code></td><td>Transition a ticket through its workflow (e.g., "In Progress" when a PR opens, "In Review" when CI passes, "Done" when merged).</td></tr>
+      </tbody>
+    </table>
+
+    <h4>Inbound flows (Jira → Kafka)</h4>
+    <p>
+      Jira sends webhooks to the Bridge for every issue update.
+      The Bridge filters, normalizes, and re-publishes the relevant ones to <code>jira.events</code> so any service can react without each one needing its own Jira webhook subscription.
+    </p>
+    <ul>
+      <li><strong>Release request:</strong> a PM transitioning a ticket to "Approved for Release" produces <code>jira.events{type:release_request}</code>. The Release Orchestrator consumes it and fires <a href="https://docs.github.com/en/rest/repos/repos#create-a-repository-dispatch-event" target="_blank" rel="noopener"><code>repository_dispatch</code></a> on the firmware repo with the requested <code>fixVersion</code> and ticket list.</li>
+      <li><strong>Defect closed:</strong> when QA closes a defect ticket, the Bridge updates the <code>jira_link</code> row so the next test failure with the same fingerprint opens a fresh ticket instead of reopening a closed one.</li>
+      <li><strong>Smart Commits:</strong> commits like <code>FW-1234 #close fixed null deref</code> get translated into Jira transitions by Bridge, mirroring Atlassian's own <a href="https://confluence.atlassian.com/fisheye/using-smart-commits-960155400.html" target="_blank" rel="noopener">Smart Commit</a> grammar.</li>
+    </ul>
+
+    <h4>Required-Jira-key enforcement</h4>
+    <p>
+      An org-level <a href="https://docs.github.com/en/actions/using-workflows/required-workflows" target="_blank" rel="noopener">Required Workflow</a> — <code>policy/jira-key.yml</code> — runs on every push and PR.
+      It greps the PR title and commit messages for <code>[A-Z]+-\d+</code>, calls the Jira REST API to confirm the key exists in an allow-listed project, and posts a <code>policy/jira-key</code> Check Run.
+      Branch protection on <code>main</code> requires that check, so a commit cannot be merged without a real Jira ticket attached.
+      The Bridge writes the resolved <code>commit_sha → issue_keys</code> mapping into <code>jira_link</code>, which is what every downstream "comment on linked tickets" step reads.
+    </p>
+
+    <p class="note"><strong>Two-way truth, one direction of authority.</strong> Code is authoritative in GHES; status / priority / scheduling are authoritative in Jira. The Bridge never overwrites a Jira field a human edited (it appends a comment instead), and never pushes commits or tags into GHES. Conflict-by-design is avoided by giving each side ownership of disjoint fields.</p>
   </article>
 
   <article id="c-hw" class="component">
@@ -403,6 +495,83 @@ sequenceDiagram
   </div>
 </section>
 
+<section id="jira-flow">
+  <h2>Diagram: Jira integration flow</h2>
+  <p>
+    Jira is the system other departments live in — PMs, QA, hardware engineers, and customer support all read and write tickets there.
+    Two paths matter:
+    <strong>(A) GitHub-initiated</strong> — engineering ships, the Bridge mirrors the result into Jira so other departments learn about it; and
+    <strong>(B) Jira-initiated</strong> — a PM approves a hotfix in Jira and the Bridge fires the GitHub release workflow on their behalf.
+    Both paths use the same Kafka topics and the same <code>jira_link</code> Postgres table, so a release reaches Jira even when it didn't originate in GitHub, and vice versa.
+  </p>
+
+  <h3>A. Dual publication: GitHub Release → Jira</h3>
+  <div class="diagram">
+    <pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant Dev as Engineer
+  participant GHES as GHES
+  participant ORC as Release Orchestrator
+  participant KAF as Kafka
+  participant JBR as Jira Bridge
+  participant JIRA as Jira
+  participant PM as PM / QA / Support
+
+  Dev->>GHES: Create GitHub Release v1.2.3
+  GHES->>ORC: webhook release.published
+  ORC->>KAF: publish release.lifecycle (published, v1.2.3)
+  ORC->>KAF: publish jira.commands (release_announce, v1.2.3, linked tickets)
+  KAF->>JBR: consume both
+  JBR->>JIRA: Find or create fixVersion v1.2.3 in project FW
+  JBR->>JIRA: Mark v1.2.3 Released; attach release notes
+  loop For each linked ticket FW-NNNN
+    JBR->>JIRA: Comment "Released in v1.2.3 → fw-1.2.3.bin"
+    JBR->>JIRA: Add fixVersion v1.2.3
+  end
+  JBR->>JIRA: Create RELEASE-project record (binary URL, target HW, signoffs)
+  JBR->>KAF: publish jira.events (released_to_jira, v1.2.3)
+  KAF->>ORC: consume jira.events
+  ORC-->>Dev: Release fully published (GitHub + Jira)
+  JIRA-->>PM: Sees fixVersion Released, release record, comments on their tickets
+    </pre>
+  </div>
+
+  <h3>B. Jira-initiated release (cross-department request)</h3>
+  <div class="diagram">
+    <pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant PM as PM / Support
+  participant JIRA as Jira
+  participant JBR as Jira Bridge
+  participant KAF as Kafka
+  participant ORC as Release Orchestrator
+  participant GHES as GHES
+  participant CD as CD Runner
+
+  PM->>JIRA: Transition FW-2050 "Approved for Release" (target v1.2.4-hotfix)
+  JIRA->>JBR: webhook (issue_updated, transition)
+  JBR->>JBR: Validate transition + lookup linked commits in jira_link
+  JBR->>KAF: publish jira.events (release_request, v1.2.4-hotfix, [FW-2050, FW-2051])
+  KAF->>ORC: consume jira.events
+  ORC->>GHES: repository_dispatch (event=jira_release_request, payload)
+  GHES->>CD: trigger release workflow on hotfix branch
+  Note over CD: Cherry-pick if needed, build, sign, run QGS gate
+  CD->>GHES: Create Release v1.2.4-hotfix (sets off flow A above)
+  Note over JBR: Flow A then comments back on FW-2050 with the binary URL
+  JBR-->>PM: Original ticket now shows "Released in v1.2.4-hotfix"
+    </pre>
+  </div>
+
+  <p class="note">
+    <strong>Failure modes.</strong>
+    <em>Bridge down:</em> <code>jira.commands</code> backs up in Kafka; the GitHub release still completes; Jira is updated when the Bridge returns.
+    <em>Jira down:</em> Bridge marks commands "in flight," retries with exponential backoff, and emits an <code>audit</code> entry; the Orchestrator does not block the GitHub release on Jira availability.
+    <em>Webhook lost:</em> the Bridge runs a nightly reconciliation job that re-reads Jira fixVersions and ticket states and emits compensating <code>jira.events</code> for anything missed.
+  </p>
+</section>
+
 <section id="kafka-topics">
   <h2>Diagram: Kafka topology</h2>
   <p><a href="https://kafka.apache.org/" target="_blank" rel="noopener">Apache Kafka</a> is the high-throughput backbone. Producers (runners, test systems, Orchestrator) and consumers (QGS, Orchestrator, analytics, audit) are decoupled through versioned topics. Schemas are registered in <a href="https://docs.confluent.io/platform/current/schema-registry/index.html" target="_blank" rel="noopener">Schema Registry</a> (or <a href="https://www.apicur.io/registry/" target="_blank" rel="noopener">Apicurio</a>) so consumers can rely on field shapes.</p>
@@ -414,6 +583,9 @@ flowchart LR
     CDR[CD Runner]
     HWR[HW Runner]
     ORC[Release Orchestrator]
+    QGSP[QGS - on gate fail]
+    HWSP[HW Reservation - on bench fault]
+    JBRP[Jira Bridge - inbound webhooks]
     AUTH[Auth and policy events]
     ARC[ARC exporter]
   end
@@ -422,6 +594,8 @@ flowchart LR
     T1[test.results - 14d]
     T2[deployment.events - 30d]
     T3[release.lifecycle - 90d]
+    T6[jira.commands - 30d]
+    T7[jira.events - 30d]
     T4[audit - 7y archived]
     T5[metrics.runners - 7d]
   end
@@ -429,6 +603,7 @@ flowchart LR
   subgraph CONS[Consumers]
     QGS[Quality Gate Service]
     ORC2[Release Orchestrator]
+    JBR[Jira Bridge]
     ANA[Analytics / BI]
     SIEM[SIEM and audit store]
     INF[InfluxDB sink]
@@ -440,6 +615,10 @@ flowchart LR
   HWR --> T2
   ORC --> T3
   ORC --> T2
+  ORC --> T6
+  QGSP --> T6
+  HWSP --> T6
+  JBRP --> T7
   AUTH --> T4
   ARC --> T5
 
@@ -448,7 +627,11 @@ flowchart LR
   T1 --> S3SINK
   T2 --> ORC2
   T2 --> ANA
+  T2 --> JBR
   T3 --> ANA
+  T3 --> JBR
+  T6 --> JBR
+  T7 --> ORC2
   T4 --> SIEM
   T4 --> S3SINK
   T5 --> INF
@@ -458,9 +641,11 @@ flowchart LR
     <thead><tr><th>Topic</th><th>Producers</th><th>Consumers</th><th>Retention</th></tr></thead>
     <tbody>
       <tr><td><code>test.results</code></td><td>Custom test systems</td><td>QGS, Analytics, S3 archive</td><td>14 days hot, archived</td></tr>
-      <tr><td><code>deployment.events</code></td><td>CD runners, Orchestrator</td><td>Orchestrator, Analytics</td><td>30 days</td></tr>
-      <tr><td><code>release.lifecycle</code></td><td>Orchestrator</td><td>Analytics, BI, Audit</td><td>90 days</td></tr>
-      <tr><td><code>audit</code></td><td>All services</td><td>SIEM, long-term audit</td><td>7 years (archived)</td></tr>
+      <tr><td><code>deployment.events</code></td><td>CD runners, Orchestrator</td><td>Orchestrator, Jira Bridge, Analytics</td><td>30 days</td></tr>
+      <tr><td><code>release.lifecycle</code></td><td>Orchestrator</td><td>Jira Bridge, Analytics, BI, Audit</td><td>90 days</td></tr>
+      <tr><td><code>jira.commands</code></td><td>Orchestrator, QGS, HW Reservation</td><td>Jira Bridge</td><td>30 days (replay buffer for Jira outages)</td></tr>
+      <tr><td><code>jira.events</code></td><td>Jira Bridge (from Jira webhooks)</td><td>Orchestrator, Analytics</td><td>30 days</td></tr>
+      <tr><td><code>audit</code></td><td>All services (incl. Jira Bridge)</td><td>SIEM, long-term audit</td><td>7 years (archived)</td></tr>
       <tr><td><code>metrics.runners</code></td><td>ARC exporter</td><td>InfluxDB sink</td><td>7 days</td></tr>
     </tbody>
   </table>
@@ -579,7 +764,11 @@ stateDiagram-v2
       <tr><td>CD blocked on criteria</td><td>Environment protection requires <code>qgs/release-criteria</code> check; fail-safe</td></tr>
       <tr><td>HW-pinned execution</td><td>ARC runners on labeled+tainted K8s nodes + HW Reservation Service</td></tr>
       <tr><td>Developer flexibility</td><td>Anyone authors workflows; constraints applied by org Required Workflows + allowed runner labels</td></tr>
-      <tr><td>On-prem / private network</td><td>GHES, ARC, MinIO, Postgres, Grafana, QGS, HW Reservation all on internal K8s</td></tr>
+      <tr><td>On-prem / private network</td><td>GHES, ARC, MinIO, Postgres, Grafana, QGS, Jira Bridge, HW Reservation all on internal K8s; Jira Data Center already on-prem</td></tr>
+      <tr><td>Other departments need release visibility (Jira)</td><td>Bridge mirrors every release to Jira <code>fixVersion</code>, comments on linked tickets, creates a <code>RELEASE</code>-project record per release</td></tr>
+      <tr><td>Defects must end up in Jira</td><td>QGS gate failures and HW bench faults publish <code>jira.commands</code>; Bridge creates Bug tickets, deduped by commit + test fingerprint</td></tr>
+      <tr><td>Cross-department release requests</td><td>Jira ticket transition → webhook → Bridge → <code>repository_dispatch</code> triggers GitHub release workflow</td></tr>
+      <tr><td>Every change must trace to a Jira ticket</td><td>Org Required Workflow <code>policy/jira-key</code> rejects PRs without a valid Jira key; Bridge populates <code>jira_link</code> for downstream lookups</td></tr>
     </tbody>
   </table>
 </section>
@@ -601,12 +790,16 @@ stateDiagram-v2
       <p>8–10 weeks. Stand up Release Orchestrator GitHub App, QGS, HW Pool. Migrate one product line's release flow. Keep the Postgres schema; point the new Orchestrator at it.</p>
     </div>
     <div class="phase">
+      <h4>Phase 2.5 — Jira Bridge</h4>
+      <p>4–6 weeks, parallel to late Phase 2. Stand up Jira Bridge in K8s, wire <code>jira.commands</code>/<code>jira.events</code> topics, register Jira webhook to Bridge. Ship the <code>policy/jira-key</code> Required Workflow in shadow mode (warn-only) for two weeks before flipping to enforce. Backfill <code>jira_link</code> from the last 6 months of merged PRs.</p>
+    </div>
+    <div class="phase">
       <h4>Phase 3 — Scale-out</h4>
-      <p>Rolling. Onboard remaining teams one at a time, each cutover gated by their custom test systems being wired into QGS.</p>
+      <p>Rolling. Onboard remaining teams one at a time, each cutover gated by their custom test systems being wired into QGS and their Jira project being added to the Bridge allow-list.</p>
     </div>
     <div class="phase">
       <h4>Phase 4 — Decommission</h4>
-      <p>Retire Bamboo and the Spring Boot app once the last product line has moved.</p>
+      <p>Retire Bamboo and the Spring Boot app once the last product line has moved. Any Jira automation rules previously triggered by Bamboo webhooks are repointed at the Bridge.</p>
     </div>
   </div>
 </section>
@@ -622,6 +815,11 @@ stateDiagram-v2
       <tr><td>GHES outage halts builds</td><td>Low</td><td>High</td><td><a href="https://docs.github.com/en/enterprise-server@latest/admin/configuration/configuring-your-enterprise/configuring-high-availability-replication-for-a-cluster" target="_blank" rel="noopener">HA replication</a> + DR runbook; release Orchestrator queues retries</td></tr>
       <tr><td>Developers route around Required Workflows</td><td>Low</td><td>Med</td><td>Org-level required workflows cannot be bypassed by repo admins; audit-log alerting</td></tr>
       <tr><td>Storage cost growth (7y retention)</td><td>High</td><td>Low</td><td>Tiered: hot S3 → cold object store after 1y; large captures to NFS not S3</td></tr>
+      <tr><td>Jira outage breaks the release pipeline</td><td>Med</td><td>Low</td><td><code>jira.commands</code> buffers in Kafka (30d retention); GitHub release proceeds unblocked; Bridge drains backlog when Jira returns</td></tr>
+      <tr><td>Jira REST API rate limits hit during release storm</td><td>Med</td><td>Med</td><td>Bridge is the single Jira client with a token-bucket limiter and per-project batching; <code>jira.commands</code> partitioned by project key for parallel-but-bounded throughput</td></tr>
+      <tr><td>Duplicate Jira defects from replay or flapping tests</td><td>Med</td><td>Low</td><td>Bridge dedup by <code>(test_name, commit_sha, bench_id)</code> fingerprint in <code>jira_link</code>; comments instead of recreating</td></tr>
+      <tr><td>Jira webhook lost or replayed</td><td>Low</td><td>Med</td><td>Nightly reconciliation job re-reads Jira fixVersion + ticket states and emits compensating <code>jira.events</code></td></tr>
+      <tr><td>Developers commit without Jira keys, blocking PRs</td><td>Med</td><td>Low</td><td>Pre-commit hook in starter repo template + IDE plugin warns locally; <code>policy/jira-key</code> Required Workflow rolls out in warn-only mode for 2 weeks before enforcement</td></tr>
     </tbody>
   </table>
 </section>
@@ -683,6 +881,17 @@ stateDiagram-v2
     <li><a href="https://prometheus.io/docs/" target="_blank" rel="noopener">Prometheus</a></li>
     <li><a href="https://grafana.com/docs/" target="_blank" rel="noopener">Grafana</a></li>
     <li><a href="https://wiki.linux-nfs.org/wiki/index.php/Main_Page" target="_blank" rel="noopener">NFS</a></li>
+  </ul>
+
+  <h3>Jira &amp; Atlassian</h3>
+  <ul class="ref">
+    <li><a href="https://www.atlassian.com/software/jira" target="_blank" rel="noopener">Atlassian Jira (Data Center)</a></li>
+    <li><a href="https://developer.atlassian.com/cloud/jira/platform/rest/v3/intro/" target="_blank" rel="noopener">Jira REST API v3</a></li>
+    <li><a href="https://developer.atlassian.com/server/jira/platform/webhooks/" target="_blank" rel="noopener">Jira webhooks</a></li>
+    <li><a href="https://support.atlassian.com/jira-software-cloud/docs/manage-versions/" target="_blank" rel="noopener">Jira Versions / fixVersion</a></li>
+    <li><a href="https://confluence.atlassian.com/fisheye/using-smart-commits-960155400.html" target="_blank" rel="noopener">Smart Commits</a></li>
+    <li><a href="https://docs.github.com/en/rest/repos/repos#create-a-repository-dispatch-event" target="_blank" rel="noopener">GitHub <code>repository_dispatch</code></a></li>
+    <li><a href="https://support.atlassian.com/jira-cloud-administration/docs/automate-your-jira-cloud-processes-and-workflows/" target="_blank" rel="noopener">Jira Automation rules</a></li>
   </ul>
 
   <h3>Legacy &amp; tooling</h3>

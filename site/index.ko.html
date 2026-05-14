@@ -26,6 +26,7 @@
       <a href="#overview">개요</a>
       <a href="#diagram">아키텍처</a>
       <a href="#components">컴포넌트</a>
+      <a href="#jira-flow">Jira 흐름</a>
       <a href="#governance">거버넌스</a>
       <a href="#data">데이터</a>
       <a href="#migration">마이그레이션</a>
@@ -52,11 +53,13 @@
         <li><a href="#c-arc">ARC 러너</a></li>
         <li><a href="#c-orch">릴리스 오케스트레이터</a></li>
         <li><a href="#c-qgs">Quality Gate Service</a></li>
+        <li><a href="#c-jira">Jira Bridge Service</a></li>
         <li><a href="#c-hw">하드웨어 인더루프</a></li>
       </ol>
     </li>
     <li><a href="#runner-pools">러너 풀 격리</a></li>
     <li><a href="#gate-sequence">CD 게이트 시퀀스</a></li>
+    <li><a href="#jira-flow">Jira 통합 흐름</a></li>
     <li><a href="#kafka-topics">Kafka 토폴로지</a></li>
     <li><a href="#data">데이터 영속성</a></li>
     <li><a href="#hw-state">HW 예약 상태</a></li>
@@ -78,8 +81,9 @@
     <a href="https://docs.github.com/en/actions" target="_blank" rel="noopener">GitHub Actions</a>,
     쿠버네티스 기반 <a href="https://github.com/actions/actions-runner-controller" target="_blank" rel="noopener">Actions Runner Controller (ARC)</a>,
     <a href="https://kafka.apache.org/" target="_blank" rel="noopener">Apache Kafka</a> 메시지 백본,
-    그리고 전용 서버에서 호스팅되는 릴리스 오케스트레이터 GitHub App으로 구성됩니다.
-    300명 이상의 개발자, 하루 5,000건 이상의 빌드, 하드웨어 인더루프 펌웨어 테스트를 지원하도록 설계되었습니다.
+    전용 서버의 릴리스 오케스트레이터 GitHub App, 그리고
+    <strong>릴리스, 결함, 부서 간 업무를 Atlassian Jira로 미러링하는 <a href="https://developer.atlassian.com/cloud/jira/platform/rest/v3/intro/" target="_blank" rel="noopener">Jira</a> Bridge Service</strong>로 구성됩니다.
+    300명 이상의 개발자, 하루 5,000건 이상의 빌드, 하드웨어 인더루프 펌웨어 테스트, 그리고 모든 변경사항이 Jira 티켓으로 추적되는 워크플로우를 지원하도록 설계되었습니다.
   </p>
 
   <div class="pill-row">
@@ -87,6 +91,7 @@
     <span class="pill">개발자 300명 이상</span>
     <span class="pill">일일 빌드 5,000건 이상</span>
     <span class="pill">하드웨어 인더루프</span>
+    <span class="pill">Jira 통합</span>
     <span class="pill">7년 릴리스 보관</span>
   </div>
 
@@ -104,12 +109,20 @@
       <p>Quality Gate Service가 <a href="https://docs.github.com/en/rest/checks/runs" target="_blank" rel="noopener">Check Run</a>을 게시하고, Environment 보호 규칙이 이를 요구합니다. 상태 없음 = 릴리스 차단.</p>
     </div>
     <div class="card">
+      <h4>Jira ↔ GitHub 브리지</h4>
+      <p>모든 릴리스는 <strong>두 번</strong> 게시됩니다: GitHub Release와 Jira <a href="https://support.atlassian.com/jira-software-cloud/docs/manage-versions/" target="_blank" rel="noopener"><code>fixVersion</code></a>. Bridge Service가 QGS 실패와 HW 결함으로부터 Jira 결함을 자동 생성합니다 — 커밋 + 테스트 핑거프린트로 중복 제거.</p>
+    </div>
+    <div class="card">
+      <h4>Jira 키 필수</h4>
+      <p>조직 수준 <a href="https://docs.github.com/en/actions/using-workflows/required-workflows" target="_blank" rel="noopener">필수 워크플로우</a>가 PR 제목 또는 커밋이 유효한 Jira 이슈(<code>FW-1234</code>)를 참조하지 않으면 거부합니다. 브랜치 보호가 강제하며, <a href="https://confluence.atlassian.com/fisheye/using-smart-commits-960155400.html" target="_blank" rel="noopener">Smart Commits</a>가 티켓 전환을 자동으로 처리합니다.</p>
+    </div>
+    <div class="card">
       <h4>영구 결과 저장</h4>
-      <p>펌웨어 바이너리는 <a href="https://min.io/docs/minio/linux/administration/object-management/object-retention.html" target="_blank" rel="noopener">Object Lock</a>과 함께 7년간 <a href="https://min.io/docs/minio/linux/index.html" target="_blank" rel="noopener">MinIO</a>/<a href="https://docs.ceph.com/" target="_blank" rel="noopener">Ceph</a>에 저장되며, 메타데이터는 <a href="https://www.postgresql.org/docs/" target="_blank" rel="noopener">PostgreSQL</a>, 메트릭은 <a href="https://docs.influxdata.com/" target="_blank" rel="noopener">InfluxDB</a> + <a href="https://grafana.com/docs/" target="_blank" rel="noopener">Grafana</a>에 저장됩니다.</p>
+      <p>펌웨어 바이너리는 <a href="https://min.io/docs/minio/linux/administration/object-management/object-retention.html" target="_blank" rel="noopener">Object Lock</a>과 함께 7년간 <a href="https://min.io/docs/minio/linux/index.html" target="_blank" rel="noopener">MinIO</a>/<a href="https://docs.ceph.com/" target="_blank" rel="noopener">Ceph</a>에 저장되며, 메타데이터와 Jira 링크는 <a href="https://www.postgresql.org/docs/" target="_blank" rel="noopener">PostgreSQL</a>, 메트릭은 <a href="https://docs.influxdata.com/" target="_blank" rel="noopener">InfluxDB</a> + <a href="https://grafana.com/docs/" target="_blank" rel="noopener">Grafana</a>에 저장됩니다.</p>
     </div>
     <div class="card">
       <h4>Kafka 백본</h4>
-      <p><a href="https://kafka.apache.org/" target="_blank" rel="noopener">Apache Kafka</a>가 프로듀서와 컨슈머를 분리합니다. 테스트 시스템, 러너, 오케스트레이터, 분석 모두가 재생 및 버스트 흡수 기능을 갖춘 버전 관리 토픽을 통해 통신합니다.</p>
+      <p><a href="https://kafka.apache.org/" target="_blank" rel="noopener">Apache Kafka</a>가 프로듀서와 컨슈머를 분리합니다. 테스트 시스템, 러너, 오케스트레이터, Jira Bridge, 분석 모두가 재생 및 버스트 흡수 기능을 갖춘 버전 관리 토픽을 통해 통신합니다.</p>
     </div>
     <div class="card">
       <h4>전용 서버의 오케스트레이터</h4>
@@ -131,24 +144,37 @@
       <tr><td>R6</td><td>하드웨어 인더루프 테스트 벤치가 파이프라인에 통합</td><td>Bamboo HW 고정 대체</td></tr>
       <tr><td>R7</td><td>모든 컴포넌트가 사내 사설 네트워크에서 운영</td><td>프로젝트 맥락</td></tr>
       <tr><td>R8</td><td>Spring Boot 릴리스 앱 완전 대체</td><td>결정사항</td></tr>
+      <tr><td>R9</td><td>모든 커밋 / PR이 Jira 이슈(<code>FW-1234</code>)로 추적 가능</td><td>부서 간 추적성</td></tr>
+      <tr><td>R10</td><td>모든 펌웨어 릴리스는 GitHub Release 외에 Jira에도 게시됨(<code>fixVersion</code> + 릴리스 노트)</td><td>Jira가 부서 간 통신 채널</td></tr>
+      <tr><td>R11</td><td>테스트/HW 실패가 Jira 결함을 자동 생성(커밋 + 테스트 핑거프린트로 중복 제거)</td><td>현재 Bamboo 워크플로우와 동등한 결함 추적</td></tr>
     </tbody>
   </table>
 </section>
 
 <section id="diagram">
   <h2>상위 수준 아키텍처</h2>
-  <p>주요 시스템과 통신 방식. GHES가 단일 진실 공급원이며, ARC가 쿠버네티스에서 러너를 확장하고, CD는 GitHub Environment 보호 규칙을 통해 Quality Gate Service에 의해 게이팅됩니다.</p>
+  <p>주요 시스템과 통신 방식. GHES는 코드, 빌드, 바이너리 릴리스의 단일 진실 공급원이며, <strong>Jira는 부서 간 업무의 기록 시스템</strong>입니다 — 이슈, 태스크, 결함, 외부 부서가 보는 릴리스 기록을 관리합니다. <strong>Jira Bridge Service</strong>가 Kafka와 Jira REST API + 웹훅을 통해 양쪽을 동기화합니다. ARC가 쿠버네티스에서 러너를 확장하고, CD는 GitHub Environment 보호 규칙을 통해 Quality Gate Service에 의해 게이팅됩니다.</p>
   <div class="diagram">
     <pre class="mermaid">
 flowchart TB
   subgraph DEV[Developers]
-    D1[Push / PR]
+    D1[Push / PR with Jira key]
+  end
+
+  subgraph DEPT[Other Departments - PM, QA, HW, Support]
+    PM[Product Mgrs and QA]
   end
 
   subgraph GHES[GitHub Enterprise Server]
     REPO[Repos and Workflows]
     ENV[Environments and Protection Rules]
-    REQW[Required Workflows org policy]
+    REQW[Required Workflows - jira-key, policy]
+  end
+
+  subgraph JIRA[Atlassian Jira Data Center]
+    JISS[Issues, Tasks, Defects]
+    JVER[Versions and Releases]
+    JWF[Project Workflows and Automation]
   end
 
   subgraph ORC_SRV[Release Orchestrator Server - dedicated VM]
@@ -159,6 +185,8 @@ flowchart TB
     K_TR[topic: test.results]
     K_DE[topic: deployment.events]
     K_RL[topic: release.lifecycle]
+    K_JE[topic: jira.events]
+    K_JC[topic: jira.commands]
     K_AU[topic: audit]
   end
 
@@ -170,6 +198,7 @@ flowchart TB
       HWP[HW Pool]
     end
     QGS[Quality Gate Service]
+    JBR[Jira Bridge Service]
     HWS[HW Reservation Service]
     OPA[OPA Gatekeeper]
   end
@@ -189,14 +218,16 @@ flowchart TB
   subgraph DATA[Data and Persistence]
     S3[S3 MinIO/Ceph]
     NFS[NFS captures]
-    PG[(PostgreSQL)]
+    PG[(PostgreSQL - releases + jira_link)]
     INFLUX[(InfluxDB)]
     GRAF[Grafana]
   end
 
   D1 --> REPO
+  PM <--> JISS
+  PM <--> JVER
   REPO -->|workflow_run| ARC
-  REQW -. enforces .-> REPO
+  REQW -. enforces jira-key .-> REPO
   ARC --> CIP
   ARC --> CDP
   ARC --> HWP
@@ -220,6 +251,15 @@ flowchart TB
   APP --> K_DE
   CDP --> K_DE
   K_DE --> APP
+  QGS -->|defect on fail| K_JC
+  HWS -->|bench fault| K_JC
+  APP -->|publish release| K_JC
+  K_JC --> JBR
+  JBR <-->|REST API| JIRA
+  JIRA -->|webhooks| JBR
+  JBR --> K_JE
+  K_JE --> APP
+  JBR --> PG
   ARC -->|metrics| INFLUX
   ARC --> K_AU
   OPA -. admission .-> POOLS
@@ -297,6 +337,56 @@ flowchart TB
       <li><code>production-firmware</code> Environment가 해당 체크를 요구합니다 — 상태 없음 = 차단.</li>
     </ol>
     <p class="note"><strong>왜 HTTP 웹훅 대신 Kafka에서 소비하나요?</strong> 하루 5,000건 이상의 빌드는 버스트성 결과 볼륨을 의미합니다. Kafka가 테스트 시스템과 QGS를 분리하고, 버스트를 흡수하며, QGS 레플리카를 독립적으로 확장하고, 테스트 시스템이 새로운 컨슈머를 알 필요 없이 분석/감사에 동일한 스트림의 복사본을 제공합니다.</p>
+  </article>
+
+  <article id="c-jira" class="component">
+    <h3>Jira Bridge Service — 부서 간 기록 시스템</h3>
+    <p>
+      K8s 네임스페이스 <code>services-integration</code>에 위치한 stateless 서비스로,
+      <a href="https://www.atlassian.com/software/jira" target="_blank" rel="noopener">Atlassian Jira Data Center</a>를 GHES, QGS, 릴리스 오케스트레이터와 동기화합니다.
+      GHES는 코드, 빌드, 바이너리 릴리스를 소유하고; <strong>Jira는 부서 간 대화를 소유합니다</strong> — 이슈, 태스크, 결함, 고객 가시 릴리스 기록.
+      Bridge는 둘 사이의 접점이며, Jira REST API와 통신할 수 있는 유일한 컴포넌트입니다.
+    </p>
+
+    <h4>왜 직접 호출 대신 Bridge인가?</h4>
+    <ul>
+      <li><strong>하나의 클라이언트, 하나의 rate-limit 예산.</strong> Jira REST API는 사용자별 동시성 제한이 있습니다. 다른 모든 서비스는 Kafka로 통신하고, Bridge만 Jira와 통신합니다 — 폭주하는 러너로 인해 자체 Jira에 실수로 DoS를 일으킬 수 없습니다.</li>
+      <li><strong>Jira 장애 시 버퍼링.</strong> Jira가 유지보수로 다운되면 <code>jira.commands</code>가 Kafka에 쌓입니다. Jira가 복구되면 Bridge가 토픽을 순서대로 소진합니다. 어떤 릴리스 이벤트도 손실되지 않으며, 파이프라인의 어떤 것도 Jira를 기다리며 차단되지 않습니다.</li>
+      <li><strong>설계상 idempotent.</strong> 각 명령은 자연 키(commit SHA, release tag, test fingerprint)를 가집니다. Bridge는 Postgres에 <code>jira_link</code> 테이블을 유지하여 재생이 중복 티켓을 생성하지 않도록 합니다.</li>
+      <li><strong>단일 감사 추적.</strong> 모든 Jira 변경은 <code>audit</code> 항목이기도 합니다; Jira 관리자가 나중에 티켓을 편집하더라도 SIEM은 Bridge가 Jira에 한 작업을 볼 수 있습니다.</li>
+    </ul>
+
+    <h4>Outbound 흐름 (Kafka → Jira)</h4>
+    <table>
+      <thead><tr><th>트리거 토픽</th><th>Jira 동작</th></tr></thead>
+      <tbody>
+        <tr><td><code>release.lifecycle</code> <code>(published)</code></td><td><a href="https://support.atlassian.com/jira-software-cloud/docs/manage-versions/" target="_blank" rel="noopener"><code>fixVersion</code></a>을 Released로 표시; 생성된 릴리스 노트 첨부; 모든 연결된 티켓에 "Released in <code>1.2.3</code> → <code>fw-1.2.3.bin</code>" 코멘트; 부서 간 가시성을 위한 <code>RELEASE</code> 프로젝트 기록 생성.</td></tr>
+        <tr><td><code>deployment.events</code></td><td>연결된 티켓에 배포 상태 / 대상 HW / 아티팩트 URL 코멘트.</td></tr>
+        <tr><td><code>jira.commands</code> <code>(create_defect)</code></td><td>Bug 티켓 생성 — 단, 먼저 <code>(test_name, commit_sha, bench_id)</code> 핑거프린트로 <code>jira_link</code>를 조회. 열린 결함이 있으면 중복을 만들지 않고 새 실패를 코멘트로 추가.</td></tr>
+        <tr><td><code>jira.commands</code> <code>(transition)</code></td><td>티켓을 워크플로우를 통해 전환(예: PR 열림 시 "In Progress", CI 통과 시 "In Review", 머지 시 "Done").</td></tr>
+      </tbody>
+    </table>
+
+    <h4>Inbound 흐름 (Jira → Kafka)</h4>
+    <p>
+      Jira는 모든 이슈 업데이트에 대해 Bridge로 웹훅을 보냅니다.
+      Bridge가 필터링, 정규화, 관련 항목을 <code>jira.events</code>에 다시 게시하여, 각 서비스가 자체 Jira 웹훅 구독 없이도 반응할 수 있게 합니다.
+    </p>
+    <ul>
+      <li><strong>릴리스 요청:</strong> PM이 티켓을 "Approved for Release"로 전환하면 <code>jira.events{type:release_request}</code>가 생성됩니다. 릴리스 오케스트레이터가 이를 소비하고 요청된 <code>fixVersion</code>과 티켓 목록으로 펌웨어 저장소에 <a href="https://docs.github.com/en/rest/repos/repos#create-a-repository-dispatch-event" target="_blank" rel="noopener"><code>repository_dispatch</code></a>를 발생시킵니다.</li>
+      <li><strong>결함 종료:</strong> QA가 결함 티켓을 종료하면 Bridge가 <code>jira_link</code> 행을 업데이트하여, 동일한 핑거프린트를 가진 다음 테스트 실패가 종료된 티켓을 재오픈하지 않고 새 티켓을 생성하도록 합니다.</li>
+      <li><strong>Smart Commits:</strong> <code>FW-1234 #close fixed null deref</code> 같은 커밋은 Bridge에 의해 Jira 전환으로 변환되며, Atlassian의 <a href="https://confluence.atlassian.com/fisheye/using-smart-commits-960155400.html" target="_blank" rel="noopener">Smart Commit</a> 문법을 미러링합니다.</li>
+    </ul>
+
+    <h4>Jira 키 필수 강제</h4>
+    <p>
+      조직 수준 <a href="https://docs.github.com/en/actions/using-workflows/required-workflows" target="_blank" rel="noopener">필수 워크플로우</a> — <code>policy/jira-key.yml</code> — 가 모든 push와 PR에 실행됩니다.
+      PR 제목과 커밋 메시지에서 <code>[A-Z]+-\d+</code>를 grep하고, Jira REST API를 호출하여 키가 허용 목록 프로젝트에 존재하는지 확인하고, <code>policy/jira-key</code> Check Run을 게시합니다.
+      <code>main</code>의 브랜치 보호가 해당 체크를 요구하므로, 실제 Jira 티켓 없이는 커밋을 머지할 수 없습니다.
+      Bridge는 해결된 <code>commit_sha → issue_keys</code> 매핑을 <code>jira_link</code>에 기록하며, 이는 모든 다운스트림 "연결된 티켓에 코멘트" 단계가 읽는 데이터입니다.
+    </p>
+
+    <p class="note"><strong>양방향 진실, 단방향 권한.</strong> 코드는 GHES에서 권위적이고, 상태 / 우선순위 / 일정은 Jira에서 권위적입니다. Bridge는 사람이 편집한 Jira 필드를 절대 덮어쓰지 않으며(대신 코멘트를 추가), GHES에 커밋이나 태그를 push하지 않습니다. 각 측에 분리된 필드의 소유권을 부여함으로써 설계상 충돌을 방지합니다.</p>
   </article>
 
   <article id="c-hw" class="component">
@@ -405,6 +495,83 @@ sequenceDiagram
   </div>
 </section>
 
+<section id="jira-flow">
+  <h2>다이어그램: Jira 통합 흐름</h2>
+  <p>
+    Jira는 다른 부서들이 사용하는 시스템입니다 — PM, QA, 하드웨어 엔지니어, 고객 지원 모두가 거기서 티켓을 읽고 씁니다.
+    중요한 두 가지 경로:
+    <strong>(A) GitHub 시작</strong> — 엔지니어링이 출시하면 Bridge가 결과를 Jira로 미러링하여 다른 부서가 알 수 있게 합니다; 그리고
+    <strong>(B) Jira 시작</strong> — PM이 Jira에서 핫픽스를 승인하면 Bridge가 그들을 대신해 GitHub 릴리스 워크플로우를 트리거합니다.
+    두 경로 모두 동일한 Kafka 토픽과 동일한 <code>jira_link</code> Postgres 테이블을 사용하므로, GitHub에서 시작하지 않은 릴리스도 Jira에 도달하고 그 반대도 마찬가지입니다.
+  </p>
+
+  <h3>A. 이중 게시: GitHub Release → Jira</h3>
+  <div class="diagram">
+    <pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant Dev as Engineer
+  participant GHES as GHES
+  participant ORC as Release Orchestrator
+  participant KAF as Kafka
+  participant JBR as Jira Bridge
+  participant JIRA as Jira
+  participant PM as PM / QA / Support
+
+  Dev->>GHES: Create GitHub Release v1.2.3
+  GHES->>ORC: webhook release.published
+  ORC->>KAF: publish release.lifecycle (published, v1.2.3)
+  ORC->>KAF: publish jira.commands (release_announce, v1.2.3, linked tickets)
+  KAF->>JBR: consume both
+  JBR->>JIRA: Find or create fixVersion v1.2.3 in project FW
+  JBR->>JIRA: Mark v1.2.3 Released; attach release notes
+  loop For each linked ticket FW-NNNN
+    JBR->>JIRA: Comment "Released in v1.2.3 → fw-1.2.3.bin"
+    JBR->>JIRA: Add fixVersion v1.2.3
+  end
+  JBR->>JIRA: Create RELEASE-project record (binary URL, target HW, signoffs)
+  JBR->>KAF: publish jira.events (released_to_jira, v1.2.3)
+  KAF->>ORC: consume jira.events
+  ORC-->>Dev: Release fully published (GitHub + Jira)
+  JIRA-->>PM: Sees fixVersion Released, release record, comments on their tickets
+    </pre>
+  </div>
+
+  <h3>B. Jira 시작 릴리스 (부서 간 요청)</h3>
+  <div class="diagram">
+    <pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant PM as PM / Support
+  participant JIRA as Jira
+  participant JBR as Jira Bridge
+  participant KAF as Kafka
+  participant ORC as Release Orchestrator
+  participant GHES as GHES
+  participant CD as CD Runner
+
+  PM->>JIRA: Transition FW-2050 "Approved for Release" (target v1.2.4-hotfix)
+  JIRA->>JBR: webhook (issue_updated, transition)
+  JBR->>JBR: Validate transition + lookup linked commits in jira_link
+  JBR->>KAF: publish jira.events (release_request, v1.2.4-hotfix, [FW-2050, FW-2051])
+  KAF->>ORC: consume jira.events
+  ORC->>GHES: repository_dispatch (event=jira_release_request, payload)
+  GHES->>CD: trigger release workflow on hotfix branch
+  Note over CD: Cherry-pick if needed, build, sign, run QGS gate
+  CD->>GHES: Create Release v1.2.4-hotfix (sets off flow A above)
+  Note over JBR: Flow A then comments back on FW-2050 with the binary URL
+  JBR-->>PM: Original ticket now shows "Released in v1.2.4-hotfix"
+    </pre>
+  </div>
+
+  <p class="note">
+    <strong>장애 모드.</strong>
+    <em>Bridge 다운:</em> <code>jira.commands</code>가 Kafka에 쌓입니다; GitHub 릴리스는 여전히 완료됩니다; Bridge 복구 시 Jira가 업데이트됩니다.
+    <em>Jira 다운:</em> Bridge가 명령을 "in flight"로 표시하고, 지수 백오프로 재시도하며, <code>audit</code> 항목을 내보냅니다; 오케스트레이터는 Jira 가용성에 GitHub 릴리스를 차단하지 않습니다.
+    <em>웹훅 손실:</em> Bridge가 야간 정합성 작업을 실행하여 Jira fixVersions와 티켓 상태를 다시 읽고 누락된 항목에 대한 보상 <code>jira.events</code>를 내보냅니다.
+  </p>
+</section>
+
 <section id="kafka-topics">
   <h2>다이어그램: Kafka 토폴로지</h2>
   <p><a href="https://kafka.apache.org/" target="_blank" rel="noopener">Apache Kafka</a>가 고처리량 백본입니다. 프로듀서(러너, 테스트 시스템, 오케스트레이터)와 컨슈머(QGS, 오케스트레이터, 분석, 감사)가 버전 관리 토픽을 통해 분리됩니다. 스키마는 <a href="https://docs.confluent.io/platform/current/schema-registry/index.html" target="_blank" rel="noopener">Schema Registry</a>(또는 <a href="https://www.apicur.io/registry/" target="_blank" rel="noopener">Apicurio</a>)에 등록되어 컨슈머가 메시지 필드 구조를 보장받을 수 있습니다.</p>
@@ -416,6 +583,9 @@ flowchart LR
     CDR[CD Runner]
     HWR[HW Runner]
     ORC[Release Orchestrator]
+    QGSP[QGS - on gate fail]
+    HWSP[HW Reservation - on bench fault]
+    JBRP[Jira Bridge - inbound webhooks]
     AUTH[Auth and policy events]
     ARC[ARC exporter]
   end
@@ -424,6 +594,8 @@ flowchart LR
     T1[test.results - 14d]
     T2[deployment.events - 30d]
     T3[release.lifecycle - 90d]
+    T6[jira.commands - 30d]
+    T7[jira.events - 30d]
     T4[audit - 7y archived]
     T5[metrics.runners - 7d]
   end
@@ -431,6 +603,7 @@ flowchart LR
   subgraph CONS[Consumers]
     QGS[Quality Gate Service]
     ORC2[Release Orchestrator]
+    JBR[Jira Bridge]
     ANA[Analytics / BI]
     SIEM[SIEM and audit store]
     INF[InfluxDB sink]
@@ -442,6 +615,10 @@ flowchart LR
   HWR --> T2
   ORC --> T3
   ORC --> T2
+  ORC --> T6
+  QGSP --> T6
+  HWSP --> T6
+  JBRP --> T7
   AUTH --> T4
   ARC --> T5
 
@@ -450,7 +627,11 @@ flowchart LR
   T1 --> S3SINK
   T2 --> ORC2
   T2 --> ANA
+  T2 --> JBR
   T3 --> ANA
+  T3 --> JBR
+  T6 --> JBR
+  T7 --> ORC2
   T4 --> SIEM
   T4 --> S3SINK
   T5 --> INF
@@ -460,9 +641,11 @@ flowchart LR
     <thead><tr><th>토픽</th><th>프로듀서</th><th>컨슈머</th><th>보존</th></tr></thead>
     <tbody>
       <tr><td><code>test.results</code></td><td>커스텀 테스트 시스템</td><td>QGS, 분석, S3 아카이브</td><td>핫 14일, 아카이브</td></tr>
-      <tr><td><code>deployment.events</code></td><td>CD 러너, 오케스트레이터</td><td>오케스트레이터, 분석</td><td>30일</td></tr>
-      <tr><td><code>release.lifecycle</code></td><td>오케스트레이터</td><td>분석, BI, 감사</td><td>90일</td></tr>
-      <tr><td><code>audit</code></td><td>모든 서비스</td><td>SIEM, 장기 감사</td><td>7년 (아카이브)</td></tr>
+      <tr><td><code>deployment.events</code></td><td>CD 러너, 오케스트레이터</td><td>오케스트레이터, Jira Bridge, 분석</td><td>30일</td></tr>
+      <tr><td><code>release.lifecycle</code></td><td>오케스트레이터</td><td>Jira Bridge, 분석, BI, 감사</td><td>90일</td></tr>
+      <tr><td><code>jira.commands</code></td><td>오케스트레이터, QGS, HW 예약</td><td>Jira Bridge</td><td>30일 (Jira 장애를 위한 재생 버퍼)</td></tr>
+      <tr><td><code>jira.events</code></td><td>Jira Bridge (Jira 웹훅으로부터)</td><td>오케스트레이터, 분석</td><td>30일</td></tr>
+      <tr><td><code>audit</code></td><td>모든 서비스 (Jira Bridge 포함)</td><td>SIEM, 장기 감사</td><td>7년 (아카이브)</td></tr>
       <tr><td><code>metrics.runners</code></td><td>ARC 익스포터</td><td>InfluxDB 싱크</td><td>7일</td></tr>
     </tbody>
   </table>
@@ -581,7 +764,11 @@ stateDiagram-v2
       <tr><td>기준 미충족 시 CD 차단</td><td>Environment 보호가 <code>qgs/release-criteria</code> 체크 요구; fail-safe</td></tr>
       <tr><td>HW 고정 실행</td><td>레이블+테인트 K8s 노드의 ARC 러너 + HW 예약 서비스</td></tr>
       <tr><td>개발자 유연성</td><td>누구나 워크플로우 작성; 제약은 조직 필수 워크플로우 + 허용된 러너 레이블로 적용</td></tr>
-      <tr><td>온프레미스 / 사내망</td><td>GHES, ARC, MinIO, Postgres, Grafana, QGS, HW 예약 모두 내부 K8s에 위치</td></tr>
+      <tr><td>온프레미스 / 사내망</td><td>GHES, ARC, MinIO, Postgres, Grafana, QGS, Jira Bridge, HW 예약 모두 내부 K8s에 위치; Jira Data Center도 이미 온프레미스</td></tr>
+      <tr><td>다른 부서가 릴리스 가시성 필요(Jira)</td><td>Bridge가 모든 릴리스를 Jira <code>fixVersion</code>으로 미러링, 연결된 티켓에 코멘트, 릴리스마다 <code>RELEASE</code> 프로젝트 기록 생성</td></tr>
+      <tr><td>결함은 Jira에 도달해야 함</td><td>QGS 게이트 실패와 HW 벤치 결함이 <code>jira.commands</code>를 게시; Bridge가 Bug 티켓 생성, 커밋 + 테스트 핑거프린트로 중복 제거</td></tr>
+      <tr><td>부서 간 릴리스 요청</td><td>Jira 티켓 전환 → 웹훅 → Bridge → <code>repository_dispatch</code>가 GitHub 릴리스 워크플로우 트리거</td></tr>
+      <tr><td>모든 변경이 Jira 티켓으로 추적</td><td>조직 필수 워크플로우 <code>policy/jira-key</code>가 유효한 Jira 키 없는 PR 거부; Bridge가 다운스트림 조회를 위해 <code>jira_link</code> 채움</td></tr>
     </tbody>
   </table>
 </section>
@@ -603,12 +790,16 @@ stateDiagram-v2
       <p>8~10주. 릴리스 오케스트레이터 GitHub App, QGS, HW 풀 구축. 제품 라인 하나의 릴리스 흐름 마이그레이션. Postgres 스키마 유지; 새 오케스트레이터를 연결.</p>
     </div>
     <div class="phase">
+      <h4>Phase 2.5 — Jira Bridge</h4>
+      <p>4~6주, Phase 2 후반과 병렬. K8s에 Jira Bridge 구축, <code>jira.commands</code>/<code>jira.events</code> 토픽 연결, Jira 웹훅을 Bridge에 등록. <code>policy/jira-key</code> 필수 워크플로우를 shadow mode(경고만)로 2주간 배포 후 강제로 전환. 지난 6개월간 머지된 PR에서 <code>jira_link</code> 백필.</p>
+    </div>
+    <div class="phase">
       <h4>Phase 3 — 규모 확장</h4>
-      <p>순차적. 나머지 팀을 한 번에 하나씩 온보딩, 각 전환은 커스텀 테스트 시스템이 QGS에 연결되는 것으로 게이팅.</p>
+      <p>순차적. 나머지 팀을 한 번에 하나씩 온보딩, 각 전환은 커스텀 테스트 시스템이 QGS에 연결되고 Jira 프로젝트가 Bridge 허용 목록에 추가되는 것으로 게이팅.</p>
     </div>
     <div class="phase">
       <h4>Phase 4 — 폐기</h4>
-      <p>마지막 제품 라인이 이전을 완료하면 Bamboo와 Spring Boot 앱 종료.</p>
+      <p>마지막 제품 라인이 이전을 완료하면 Bamboo와 Spring Boot 앱 종료. 이전에 Bamboo 웹훅으로 트리거되던 Jira 자동화 규칙은 Bridge로 재지정.</p>
     </div>
   </div>
 </section>
@@ -624,6 +815,11 @@ stateDiagram-v2
       <tr><td>GHES 중단으로 빌드 중단</td><td>낮음</td><td>높음</td><td><a href="https://docs.github.com/en/enterprise-server@latest/admin/configuration/configuring-your-enterprise/configuring-high-availability-replication-for-a-cluster" target="_blank" rel="noopener">HA 복제</a> + DR 런북; 릴리스 오케스트레이터가 재시도를 대기열에 추가</td></tr>
       <tr><td>개발자가 필수 워크플로우를 우회</td><td>낮음</td><td>중간</td><td>조직 수준 필수 워크플로우는 저장소 관리자도 우회 불가; 감사 로그 알림</td></tr>
       <tr><td>스토리지 비용 증가 (7년 보존)</td><td>높음</td><td>낮음</td><td>계층화: 핫 S3 → 1년 후 콜드 오브젝트 스토어; 대용량 캡처는 S3 대신 NFS</td></tr>
+      <tr><td>Jira 장애로 릴리스 파이프라인 중단</td><td>중간</td><td>낮음</td><td><code>jira.commands</code>가 Kafka에 버퍼링(30일 보존); GitHub 릴리스는 차단 없이 진행; Jira 복구 시 Bridge가 백로그 처리</td></tr>
+      <tr><td>릴리스 폭주 시 Jira REST API rate limit 도달</td><td>중간</td><td>중간</td><td>Bridge가 token-bucket 리미터와 프로젝트별 배칭을 갖춘 단일 Jira 클라이언트; <code>jira.commands</code>를 프로젝트 키로 파티션하여 병렬-제한 처리량</td></tr>
+      <tr><td>재생 또는 flapping 테스트로 인한 Jira 결함 중복</td><td>중간</td><td>낮음</td><td>Bridge가 <code>jira_link</code>에서 <code>(test_name, commit_sha, bench_id)</code> 핑거프린트로 dedup; 재생성 대신 코멘트</td></tr>
+      <tr><td>Jira 웹훅 손실 또는 재생</td><td>낮음</td><td>중간</td><td>야간 정합성 작업이 Jira fixVersion + 티켓 상태를 다시 읽고 보상 <code>jira.events</code>를 내보냄</td></tr>
+      <tr><td>개발자가 Jira 키 없이 커밋하여 PR 차단</td><td>중간</td><td>낮음</td><td>스타터 저장소 템플릿의 pre-commit 훅 + IDE 플러그인이 로컬에서 경고; <code>policy/jira-key</code> 필수 워크플로우는 강제 전 2주간 warn-only 모드로 롤아웃</td></tr>
     </tbody>
   </table>
 </section>
@@ -685,6 +881,17 @@ stateDiagram-v2
     <li><a href="https://prometheus.io/docs/" target="_blank" rel="noopener">Prometheus</a></li>
     <li><a href="https://grafana.com/docs/" target="_blank" rel="noopener">Grafana</a></li>
     <li><a href="https://wiki.linux-nfs.org/wiki/index.php/Main_Page" target="_blank" rel="noopener">NFS</a></li>
+  </ul>
+
+  <h3>Jira &amp; Atlassian</h3>
+  <ul class="ref">
+    <li><a href="https://www.atlassian.com/software/jira" target="_blank" rel="noopener">Atlassian Jira (Data Center)</a></li>
+    <li><a href="https://developer.atlassian.com/cloud/jira/platform/rest/v3/intro/" target="_blank" rel="noopener">Jira REST API v3</a></li>
+    <li><a href="https://developer.atlassian.com/server/jira/platform/webhooks/" target="_blank" rel="noopener">Jira 웹훅</a></li>
+    <li><a href="https://support.atlassian.com/jira-software-cloud/docs/manage-versions/" target="_blank" rel="noopener">Jira Versions / fixVersion</a></li>
+    <li><a href="https://confluence.atlassian.com/fisheye/using-smart-commits-960155400.html" target="_blank" rel="noopener">Smart Commits</a></li>
+    <li><a href="https://docs.github.com/en/rest/repos/repos#create-a-repository-dispatch-event" target="_blank" rel="noopener">GitHub <code>repository_dispatch</code></a></li>
+    <li><a href="https://support.atlassian.com/jira-cloud-administration/docs/automate-your-jira-cloud-processes-and-workflows/" target="_blank" rel="noopener">Jira Automation 규칙</a></li>
   </ul>
 
   <h3>레거시 및 도구</h3>
